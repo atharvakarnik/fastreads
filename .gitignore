@@ -1,0 +1,15 @@
+# data folders
+subPETs/
+SPM_Outputs/
+ANTs_Outputs/
+subPETs_forIlyaReview/
+
+# OS/editor clutter
+.DS_Store
+Thumbs.db
+.vscode/
+__pycache__/
+*.pyc
+
+# secrets
+.env

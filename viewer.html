@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PET MNI Viewer</title>
+
+  <!-- Prevent favicon.ico 404 -->
+  <link rel="icon" href="data:,">
+
+  <style>
+    :root { --panelW: 420px; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; height:100vh; display:flex; background:#0b1220; color:#e6edf7; }
+    #left { width: var(--panelW); padding:14px; box-sizing:border-box; border-right:1px solid rgba(255,255,255,0.08); background:#0f1a33; overflow:auto; }
+    #viewerWrap { flex:1; display:flex; flex-direction:column; min-width: 0; }
+    #topBar { padding:10px 12px; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; align-items:center; gap:10px; background:#0f1a33; }
+    #gl { flex:1; min-height: 0; }
+    canvas { width:100% !important; height:100% !important; display:block; background:#000; }
+
+    .row { display:flex; gap:8px; margin:10px 0; flex-wrap:wrap; align-items:center; }
+    button, input { border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#13224a; color:#e6edf7; padding:10px 12px; }
+    button { cursor:pointer; }
+    button:hover { filter:brightness(1.08); }
+    button:disabled { opacity:0.5; cursor:not-allowed; }
+    input[type="text"] { flex:1; min-width: 110px; }
+    input[type="range"] { width:100%; padding:0; }
+
+    textarea { width:100%; height: 24vh; resize: vertical; border-radius:12px; border:1px solid rgba(255,255,255,0.15); background:#0b1430; color:#e6edf7; padding:10px; box-sizing:border-box; }
+
+    .label { font-size:12px; opacity:0.8; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .chip { font-size:12px; padding:4px 8px; border-radius:999px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12); }
+    .status { font-size:12px; opacity:0.85; line-height:1.35; }
+    .hr { height:1px; background:rgba(255,255,255,0.08); margin:12px 0; }
+
+    details summary { cursor:pointer; user-select:none; font-weight:600; }
+
+    .voiCard { margin-bottom:12px; padding:10px; border-radius:12px; border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.03); }
+    .voiTop { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .voiName { font-weight:600; }
+    .voiMeta { font-size:12px; opacity:0.85; }
+    .voiRow { display:flex; align-items:center; gap:10px; margin-top:8px; }
+    .voiRow label { font-size:12px; opacity:0.9; width:60px; }
+  </style>
+</head>
+
+<body>
+  <div id="left">
+    <div class="label">Subject</div>
+    <div style="display:flex; align-items:center; gap:10px; margin-top:6px;">
+      <div class="chip">ID: <span id="sid" class="mono">------</span></div>
+      <div class="chip">Index: <span id="sidx" class="mono">-</span>/<span id="scount" class="mono">-</span></div>
+    </div>
+
+    <div class="row" style="margin-top:12px;">
+      <button id="prevBtn">← Prev</button>
+      <button id="nextBtn">Next →</button>
+    </div>
+
+    <div class="label" style="margin-top:6px;">Go to ID (6 digits)</div>
+    <div class="row">
+      <input id="gotoInput" class="mono" placeholder="e.g., 011002" maxlength="6" type="text" />
+      <button id="goBtn">Go</button>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="label">PET opacity</div>
+    <input id="petOpacity" type="range" min="0" max="1" step="0.05" value="1.00">
+    <div class="status">Value: <span class="mono" id="petOpacityLabel">1.00</span></div>
+
+    <div class="hr"></div>
+
+    <div class="label">MNI template controls</div>
+    <div class="row">
+      <label style="display:flex; align-items:center; gap:8px; font-size:12px; opacity:0.9;">
+        <input id="mniVisible" type="checkbox" checked>
+        Show MNI template
+      </label>
+    </div>
+    <input id="mniOpacity" type="range" min="0" max="1" step="0.05" value="1.00">
+    <div class="status">Value: <span class="mono" id="mniOpacityLabel">1.00</span></div>
+
+    <div class="hr"></div>
+
+    <div class="label">Notes (autosaved locally; click “Save Notes” to write notes.csv)</div>
+    <textarea id="notes" placeholder="Type notes here..."></textarea>
+
+    <div class="row">
+      <button id="saveBtn">Save Notes → notes.csv</button>
+      <button id="clearBtn" title="Clears notes for current ID only">Clear This</button>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <div class="hr"></div>
+
+    <details open>
+      <summary>VOI Controls (toggle + opacity)</summary>
+
+      <div style="margin-top:10px;">
+        <div class="label">All VOIs opacity</div>
+        <input id="masterOpacity" type="range" min="0" max="1" step="0.05" value="0.30">
+        <div class="status">Value: <span class="mono" id="masterOpacityLabel">0.30</span></div>
+      </div>
+
+      <div class="hr"></div>
+      <div id="voiControls"></div>
+    </details>
+  </div>
+
+  <div id="viewerWrap">
+    <div id="topBar">
+      <div class="chip">Template: <span class="mono">Atlases/avg152T1.nii.gz</span></div>
+      <div class="chip">PET: <span class="mono" id="petPathChip">-</span></div>
+      <div style="margin-left:auto" class="status" id="topStatus"></div>
+    </div>
+    <div id="gl"></div>
+  </div>
+
+  <script src="./niivue.umd.js"></script>
+
+  <script>
+    // ---------------- Files ----------------
+    const ATLAS = {
+      template: "Atlases/avg152T1.nii.gz",
+      whlcbl:   "Atlases/voi_WhlCbl_2mm.nii.gz",
+      ctx:      "Atlases/voi_ctx_2mm.nii.gz",
+      pons:     "Atlases/voi_Pons_2mm.nii.gz",
+      cerebgry: "Atlases/voi_CerebGry_2mm.nii.gz",
+      whlcblbs: "Atlases/voi_WhlCblBrnStm_2mm.nii.gz",
+    };
+
+    // VOI colors (hardcoded)
+    const VOIS = [
+      { key: "whlcbl",   label: "Whole Cerebellum",     uiHex: "#2ecc71" }, // green
+      { key: "ctx",      label: "Cortex",              uiHex: "#e74c3c" }, // red
+      { key: "pons",     label: "Pons",                uiHex: "#f1c40f" }, // yellow
+      { key: "cerebgry", label: "Cerebellar Gray",     uiHex: "#00bcd4" }, // cyan
+      { key: "whlcblbs", label: "WhlCbl + Brainstem",  uiHex: "#9b59b6" }, // magenta
+    ];
+
+    const DEFAULT_VOI_OPACITY = 0.30;
+    const LS_KEY = "PET_VIEWER_NOTES_FULL_ONLY_V2";
+
+    // ---------------- UI ----------------
+    const sidEl = document.getElementById("sid");
+    const sidxEl = document.getElementById("sidx");
+    const scountEl = document.getElementById("scount");
+    const statusEl = document.getElementById("status");
+    const topStatusEl = document.getElementById("topStatus");
+    const petPathChip = document.getElementById("petPathChip");
+
+    const notesEl = document.getElementById("notes");
+    const gotoInput = document.getElementById("gotoInput");
+
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const goBtn = document.getElementById("goBtn");
+    const saveBtn = document.getElementById("saveBtn");
+    const clearBtn = document.getElementById("clearBtn");
+
+    const petOpacity = document.getElementById("petOpacity");
+    const petOpacityLabel = document.getElementById("petOpacityLabel");
+
+    const mniVisible = document.getElementById("mniVisible");
+    const mniOpacity = document.getElementById("mniOpacity");
+    const mniOpacityLabel = document.getElementById("mniOpacityLabel");
+
+    const voiControlsDiv = document.getElementById("voiControls");
+    const masterOpacity = document.getElementById("masterOpacity");
+    const masterOpacityLabel = document.getElementById("masterOpacityLabel");
+
+    // ---------------- Notes ----------------
+    function loadLocalNotes() {
+      try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch { return {}; }
+    }
+    function saveLocalNotes(obj) { localStorage.setItem(LS_KEY, JSON.stringify(obj)); }
+    let notesMap = loadLocalNotes();
+
+    // ---------------- VOI state ----------------
+    let voiState = {};
+    function initVoiState(op=DEFAULT_VOI_OPACITY) {
+      voiState = {};
+      for (const v of VOIS) voiState[v.key] = { visible: true, opacity: op };
+      masterOpacity.value = String(op);
+      masterOpacityLabel.textContent = op.toFixed(2);
+    }
+
+    // ---------------- Niivue ----------------
+    const { Niivue, NVImage } = (window.niivue || {});
+    if (!Niivue || !NVImage) {
+      alert("Niivue UMD did not expose Niivue/NVImage. Check niivue.umd.js.");
+      throw new Error("Missing Niivue/NVImage");
+    }
+
+    const glDiv = document.getElementById("gl");
+    const canvas = document.createElement("canvas");
+    glDiv.appendChild(canvas);
+
+    let nv = null;
+    function createNiivueInstance() {
+      const n = new Niivue({ isColorbar:false, backColor:[0,0,0,1], show3Dcrosshair:true });
+      n.attachToCanvas(canvas);
+      return n;
+    }
+    nv = createNiivueInstance();
+
+    // ---------------- Safe setters (INDEX-based) ----------------
+    function volCount() { return Array.isArray(nv.volumes) ? nv.volumes.length : 0; }
+
+    function hexToRgb(hex) {
+      const h = (hex || "").replace("#", "").trim();
+      if (h.length !== 6) return { r: 255, g: 255, b: 255 };
+      return {
+        r: parseInt(h.slice(0, 2), 16),
+        g: parseInt(h.slice(2, 4), 16),
+        b: parseInt(h.slice(4, 6), 16),
+      };
+    }
+
+    // Create a 2-entry label LUT: 0 transparent, 1 = chosen color
+    function makeBinaryLabelLUT(hex) {
+      const { r, g, b } = hexToRgb(hex);
+      return {
+        R: [0, r],
+        G: [0, g],
+        B: [0, b],
+        A: [0, 255],
+        I: [0, 1],
+      };
+    }
+
+    // Apply LUT to an NVImage in a version-safe way
+    function applyLabelLUTToImage(img, hex) {
+      const lut = makeBinaryLabelLUT(hex);
+      try {
+        if (typeof img.setColormapLabel === "function") {
+          img.setColormapLabel(lut);
+        } else {
+          img.colormapLabel = lut;
+        }
+      } catch (e) {
+        console.warn("Could not apply label LUT to VOI:", e);
+      }
+    }
+    function setOpacitySafe(i, op) {
+      if (i < 0 || i >= volCount()) return;
+      try { nv.setOpacity(i, op); }
+      catch {
+        try { nv.volumes[i].opacity = op; } catch {}
+      }
+    }
+
+    function setColormapSafe(i, cmap) {
+      if (i < 0 || i >= volCount()) return;
+      try { nv.setColormap(i, cmap); }
+      catch {
+        try { nv.volumes[i].colormap = cmap; } catch {}
+      }
+    }
+
+    function setCalibrationSafe(i, mn, mx) {
+      if (i < 0 || i >= volCount()) return;
+      try { nv.setCalibration(i, mn, mx); }
+      catch {
+        try { nv.volumes[i].cal_min = mn; nv.volumes[i].cal_max = mx; } catch {}
+      }
+    }
+
+    function setInterpSafe(i, isLinear) {
+      // Masks look better with nearest neighbor (if API exists)
+      try { nv.setInterpolation && nv.setInterpolation(i, isLinear); } catch {}
+    }
+
+    function refresh() {
+      try { nv.updateGLVolume && nv.updateGLVolume(); } catch {}
+    }
+
+    function removeAllVolumesCompat() {
+      if (typeof nv.removeAllVolumes === "function") { nv.removeAllVolumes(); return; }
+      if (typeof nv.removeVolume === "function" && Array.isArray(nv.volumes)) {
+        for (let i = nv.volumes.length - 1; i >= 0; i--) { try { nv.removeVolume(i); } catch {} }
+        return;
+      }
+      nv = createNiivueInstance();
+    }
+
+    // ---------------- Data/caches ----------------
+    const atlasCache = new Map(); // template + VOIs
+    const petCache = new Map();   // id->NVImage
+
+    let subjects = []; // from /api/subjects
+    let idx = 0;
+    let currentId = null;
+
+    async function loadAtlasOnce() {
+      statusEl.textContent = "Loading atlases (one-time)...";
+
+      atlasCache.set("template", await NVImage.loadFromUrl({ url: ATLAS.template }));
+
+      for (const v of VOIS) {
+        const img = await NVImage.loadFromUrl({ url: ATLAS[v.key] });
+        // IMPORTANT: force exact overlay color using custom LUT
+        applyLabelLUTToImage(img, v.uiHex);
+        atlasCache.set(v.key, img);
+      }
+
+      statusEl.textContent = "Atlases loaded.";
+    }
+
+    async function getPET(si) {
+      const subj = subjects[si];
+      if (!subj) return null;
+      const id = subj.id;
+      if (petCache.has(id)) return petCache.get(id);
+      const img = await NVImage.loadFromUrl({ url: subj.full_path });
+      petCache.set(id, img);
+      return img;
+    }
+
+    function rebuildVolumes(templateImg, petImg) {
+      removeAllVolumesCompat();
+      nv.addVolume(templateImg); // index 0
+      nv.addVolume(petImg);      // index 1
+      for (const v of VOIS) nv.addVolume(atlasCache.get(v.key)); // index 2+
+    }
+
+    function applyAllDisplaySettings() {
+      // Ensure volumes exist before setting properties
+      if (volCount() < 2 + VOIS.length) return;
+
+      // Template in grayscale
+      setColormapSafe(0, "gray");
+      setOpacitySafe(0, mniVisible.checked ? parseFloat(mniOpacity.value) : 0.0);
+
+      // PET in grayscale
+      setColormapSafe(1, "gray");
+      setOpacitySafe(1, parseFloat(petOpacity.value));
+    }
+
+    function applyVoiStateToViewer() {
+      if (volCount() < 2 + VOIS.length) return;
+      for (let i=0; i<VOIS.length; i++) {
+        const vi = 2 + i;
+        const v = VOIS[i];
+        const st = voiState[v.key];
+        setOpacitySafe(vi, st.visible ? st.opacity : 0.0);
+      }
+      refresh();
+    }
+
+    // ---------------- UI build ----------------
+    function buildVoiControls() {
+      voiControlsDiv.innerHTML = "";
+      for (const v of VOIS) {
+        const st = voiState[v.key];
+
+        const card = document.createElement("div");
+        card.className = "voiCard";
+
+        const top = document.createElement("div");
+        top.className = "voiTop";
+
+        const left = document.createElement("div");
+        left.innerHTML = `<div class="voiName">${v.label}</div>
+                          <div class="voiMeta">Color: <span class="mono">${v.cmap}</span></div>`;
+
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.checked = st.visible;
+        toggle.style.accentColor = v.uiHex;
+        toggle.addEventListener("change", () => {
+          voiState[v.key].visible = toggle.checked;
+          applyVoiStateToViewer();
+        });
+
+        top.appendChild(left);
+        top.appendChild(toggle);
+
+        const row = document.createElement("div");
+        row.className = "voiRow";
+
+        const lab = document.createElement("label");
+        lab.textContent = "Opacity";
+
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.min = "0"; slider.max = "1"; slider.step = "0.05";
+        slider.value = String(st.opacity);
+        slider.style.accentColor = v.uiHex;
+
+        const val = document.createElement("span");
+        val.className = "mono";
+        val.textContent = st.opacity.toFixed(2);
+
+        slider.addEventListener("input", () => {
+          const op = parseFloat(slider.value);
+          voiState[v.key].opacity = op;
+          val.textContent = op.toFixed(2);
+          applyVoiStateToViewer();
+        });
+
+        row.appendChild(lab);
+        row.appendChild(slider);
+        row.appendChild(val);
+
+        card.appendChild(top);
+        card.appendChild(row);
+        voiControlsDiv.appendChild(card);
+      }
+    }
+
+    masterOpacity.addEventListener("input", () => {
+      const val = parseFloat(masterOpacity.value);
+      masterOpacityLabel.textContent = val.toFixed(2);
+      for (const v of VOIS) voiState[v.key].opacity = val;
+      buildVoiControls();
+      applyVoiStateToViewer();
+    });
+
+    petOpacity.addEventListener("input", () => {
+      const val = parseFloat(petOpacity.value);
+      petOpacityLabel.textContent = val.toFixed(2);
+      // PET is index 1
+      setOpacitySafe(1, val);
+      refresh();
+    });
+
+    mniOpacity.addEventListener("input", () => {
+    const val = parseFloat(mniOpacity.value);
+    mniOpacityLabel.textContent = val.toFixed(2);
+    // MNI template is index 0
+    setOpacitySafe(0, mniVisible.checked ? val : 0.0);
+    refresh();
+  });
+
+  mniVisible.addEventListener("change", () => {
+    const val = parseFloat(mniOpacity.value);
+    setOpacitySafe(0, mniVisible.checked ? val : 0.0);
+    refresh();
+  });
+
+    // ---------------- Navigation ----------------
+    function findIndexById(id){ return subjects.findIndex(s => s.id === id); }
+
+    async function loadSubjectByIndex(newIdx){
+      if (!subjects.length) return;
+      idx = Math.max(0, Math.min(newIdx, subjects.length - 1));
+      const subj = subjects[idx];
+      currentId = subj.id;
+
+      sidEl.textContent = currentId;
+      sidxEl.textContent = String(idx + 1);
+      scountEl.textContent = String(subjects.length);
+
+      notesEl.value = (notesMap[currentId] ?? "");
+      petPathChip.textContent = (subj.full_path || "").split("/").pop();
+      topStatusEl.textContent = subj.full_path || "";
+
+      statusEl.textContent = "Loading FULL PET...";
+      try {
+        const templateImg = atlasCache.get("template");
+        const petImg = await getPET(idx);
+        if (!templateImg || !petImg) { statusEl.textContent = "Missing template or PET."; return; }
+
+        rebuildVolumes(templateImg, petImg);
+
+        // Important: wait one tick so nv.volumes is populated in this Niivue build
+        await new Promise(r => requestAnimationFrame(r));
+
+        applyAllDisplaySettings();
+        statusEl.textContent = "Ready.";
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = "ERROR loading PET (see console).";
+      }
+    }
+
+    // Notes
+    notesEl.addEventListener("input", () => {
+      if (!currentId) return;
+      notesMap[currentId] = notesEl.value;
+      saveLocalNotes(notesMap);
+      statusEl.textContent = "Notes autosaved locally (not yet written to notes.csv).";
+    });
+
+    clearBtn.addEventListener("click", () => {
+      if (!currentId) return;
+      notesEl.value = "";
+      notesMap[currentId] = "";
+      saveLocalNotes(notesMap);
+      statusEl.textContent = `Cleared notes for ${currentId}.`;
+    });
+
+    prevBtn.addEventListener("click", () => loadSubjectByIndex(idx - 1));
+    nextBtn.addEventListener("click", () => loadSubjectByIndex(idx + 1));
+
+    goBtn.addEventListener("click", () => {
+      const id = (gotoInput.value || "").trim();
+      if (!/^\d{6}$/.test(id)) { statusEl.textContent = "Enter a 6-digit ID."; return; }
+      const j = findIndexById(id);
+      if (j < 0) { statusEl.textContent = `ID ${id} not found.`; return; }
+      loadSubjectByIndex(j);
+    });
+
+    gotoInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") goBtn.click();
+    });
+
+    saveBtn.addEventListener("click", async () => {
+      try {
+        statusEl.textContent = "Saving notes.csv...";
+        const r = await fetch("/api/notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ notes: notesMap })
+        });
+        const out = await r.json();
+        if (!out.ok) throw new Error(out.error || "Save failed");
+        statusEl.textContent = `Saved notes.csv (rows with notes: ${out.count}).`;
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = "ERROR saving notes.csv (see console).";
+      }
+    });
+
+    // ---------------- Init ----------------
+    async function init(){
+      try {
+        statusEl.textContent = "Loading subject list...";
+        const rs = await fetch("/api/subjects");
+        const js = await rs.json();
+
+        // server returns {id, qc_path, full_path} — we only use full_path
+        subjects = (js.subjects || []).map(s => ({ id: s.id, full_path: s.full_path }));
+        if (!subjects.length) { statusEl.textContent = "No PETs found in subPETs/."; return; }
+        scountEl.textContent = String(subjects.length);
+
+        // merge notes.csv from server into local (local wins)
+        try {
+          const rn = await fetch("/api/notes");
+          const jn = await rn.json();
+          if (jn && jn.notes && typeof jn.notes === "object") {
+            notesMap = { ...jn.notes, ...notesMap };
+            saveLocalNotes(notesMap);
+          }
+        } catch {}
+
+        initVoiState(DEFAULT_VOI_OPACITY);
+        buildVoiControls();
+
+        await loadAtlasOnce();
+        await loadSubjectByIndex(0);
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = "Could not connect to server. Start via Start_Viewer.bat.";
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
