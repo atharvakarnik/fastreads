@@ -1,44 +1,56 @@
 # PET MNI Overlay Viewer
 
-A lightweight local NIfTI viewer designed for physicians/neuroimaging analysts to perform visual reads locally over web browser without neuroimaging workstation setup. The code-skeleton can be repurposed to view any other .nii or ROI masks. Currently focused on QC of **MNI-normalized PET images** with standard **VOI mask overlays**.
+A lightweight local NIfTI viewer designed for physicians/neuroimaging analysts to perform visual reads in a web browser without a full neuroimaging workstation setup.
 
-It is intended for quick review of subject PET scans in MNI space, alongside the MNI template and commonly used Centiloid-style VOIs. The viewer runs entirely on your own machine in a web browser, with simple controls for stepping through subjects, adjusting overlay visibility, and recording per-subject notes.
+It currently supports two review modes:
+
+- **PET view**: PET-space subject volume only, with a PET-only grayscale inversion toggle (default ON for black-on-white display).
+- **MNI view**: MNI-normalized PET with MNI template + Centiloid-style VOI overlays.
+
+The viewer runs entirely on your own machine, with controls for stepping through subjects, adjusting display/overlay visibility, and recording per-subject notes.
 
 ## What it does
 
 This project lets you:
 
-- view a subject PET scan over the MNI template
-- overlay standard VOI masks in distinct colors
+- switch between **PET** and **MNI** viewing modes
+- view PET-space scans with default inverted grayscale for better physician readability
+- view MNI-space PET scans over the template
+- overlay standard VOI masks in distinct colors (MNI mode)
 - control opacity/visibility of PET, MNI template, and each VOI
 - move subject-by-subject or jump directly to a specific ID
 - enter and save QC notes to `notes.csv`
 
-The viewer is for **inspection and annotation**, not image processing. PET images must already be in **MNI space**.
+The viewer is for **inspection and annotation**, not image processing.
 
 ## What to expect
 
-When launched, the viewer opens a local webpage that shows:
+When launched, the viewer opens a local webpage with:
 
-- the **MNI template**
-- one **subject PET** volume
-- the following **VOI overlays**:
-  - Whole Cerebellum
-  - Cortex
-  - Pons
-  - Cerebellar Gray
-  - Whole Cerebellum + Brainstem
+- **PET mode**
+  - one PET-space subject volume
+  - PET-only invert toggle (default: inverted grayscale)
+- **MNI mode**
+  - the MNI template
+  - one subject PET volume from `subPETs/`
+  - the following VOI overlays:
+    - Whole Cerebellum
+    - Cortex
+    - Pons
+    - Cerebellar Gray
+    - Whole Cerebellum + Brainstem
 
-You can adjust opacity for each layer, hide/show overlays, and attach notes to each subject as you review them.
+You can adjust opacity, hide/show overlays, and attach notes to each subject as you review them.
 
 ## Project layout
-```
+
+```text
 fastreads/
 ├── viewer.html
 ├── server.py
 ├── niivue.umd.js
 ├── Start_Viewer.bat
-├── Start_Viewer_mac.sh
+├── Start_Viewer.sh
 ├── Atlases/
 │   ├── avg152T1.nii.gz
 │   ├── voi_ctx_2mm.nii.gz
@@ -46,17 +58,20 @@ fastreads/
 │   ├── voi_Pons_2mm.nii.gz
 │   ├── voi_CerebGry_2mm.nii.gz
 │   └── voi_WhlCblBrnStm_2mm.nii.gz
-└── subPETs/
-    ├── w011002_PET_3D.nii
-    ├── w011005_PET_3D.nii
+├── subPETs/
+│   ├── w011002_PET_3D.nii
+│   ├── w011005_PET_3D.nii
+│   └── ...
+└── PET_Space/
+    ├── 011002_PET_3D.nii
+    ├── 011005_PET_3D.nii
     └── ...
 ```
 
-PET filenames should follow this pattern:
+Input naming conventions:
 
-wXXXXXX_PET_3D.nii
-
-where `XXXXXX` is the 6-digit subject ID.
+- `subPETs/`: filenames should include ID as `wXXXXXX` (for example, `w011002_PET_3D.nii`).
+- `PET_Space/`: filenames should follow `XXXXXX_PET_3D.nii` (for example, `011002_PET_3D.nii`).
 
 ## Run it
 
@@ -66,7 +81,7 @@ Double-click: `Start_Viewer.bat`
 
 ### macOS
 
-Open Terminal in the project folder and run: `bash Start_Viewer_mac.sh`
+Open Terminal in the project folder and run: `bash Start_Viewer.sh`
 
 The viewer will open in your browser at:
 
@@ -81,8 +96,7 @@ The viewer will open in your browser at:
 
 ## In one line
 
-This is a simple, portable QC viewer for browsing **MNI-space PET scans with VOI overlays and notes**, without needing a full neuroimaging workstation setup.
-
+This is a simple, portable QC viewer for browsing PET-space and MNI-space PET scans, with VOI overlays in MNI mode and per-subject notes.
 
 ## Third-party libraries
 
