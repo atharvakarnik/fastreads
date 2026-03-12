@@ -77,6 +77,16 @@
 
     <div class="hr"></div>
 
+    <div id="petOnlyControls">
+      <div class="label">PET display controls</div>
+      <div class="row" style="margin-top:6px;">
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px; opacity:0.95;">
+          <input id="petInvert" type="checkbox" checked>
+          Invert grayscale (black on white)
+        </label>
+      </div>
+    </div>
+
     <div id="mniOnlyControls">
       <div class="label">PET opacity</div>
       <input id="petOpacity" type="range" min="0" max="1" step="0.05" value="1.00">
@@ -171,7 +181,9 @@
 
     const viewPet = document.getElementById("viewPet");
     const viewMni = document.getElementById("viewMni");
+    const petOnlyControls = document.getElementById("petOnlyControls");
     const mniOnlyControls = document.getElementById("mniOnlyControls");
+    const petInvert = document.getElementById("petInvert");
 
     const notesEl = document.getElementById("notes");
     const gotoInput = document.getElementById("gotoInput");
@@ -282,6 +294,11 @@
       }
     }
 
+    function setColormapInvertSafe(i, invert) {
+      if (i < 0 || i >= volCount()) return;
+      try { nv.volumes[i].colormapInvert = !!invert; } catch {}
+    }
+
     function setCalibrationSafe(i, mn, mx) {
       if (i < 0 || i >= volCount()) return;
       try { nv.setCalibration(i, mn, mx); }
@@ -387,6 +404,7 @@
     function applyPetOnlyDisplaySettings() {
       if (volCount() < 1) return;
       setColormapSafe(0, "gray");
+      setColormapInvertSafe(0, petInvert.checked);
       setOpacitySafe(0, 1.0);
       refresh();
     }
@@ -497,10 +515,16 @@
       refresh();
     });
 
+    petInvert.addEventListener("change", () => {
+      if (currentView !== VIEW.PET) return;
+      applyPetOnlyDisplaySettings();
+    });
+
     function setViewUiState() {
       const isMni = currentView === VIEW.MNI;
       viewModeChip.textContent = currentView;
       templateChip.style.display = isMni ? "" : "none";
+      petOnlyControls.style.display = isMni ? "none" : "";
       mniOnlyControls.style.display = isMni ? "" : "none";
       viewPet.checked = !isMni;
       viewMni.checked = isMni;
