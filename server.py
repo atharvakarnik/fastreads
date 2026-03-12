@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 PORT = 8000
 SUBPETS_DIR = "subPETs"
-SUBPETS_QC_DIR = "subPETs_qc"
+PET_SPACE_DIR = "PET_Space"
 NOTES_CSV = "notes.csv"
 
 ID_RE = re.compile(r"w(\d{6})", re.IGNORECASE)
@@ -58,14 +58,18 @@ def list_subjects():
     subjects = []
     for sid in ids:
         full_fn = _pick_best_file(SUBPETS_DIR, sid)
-        qc_fn = _pick_best_file(SUBPETS_QC_DIR, sid)
+        pet_space_fn = f"{sid}_PET_3D.nii"
+        pet_space_abs = os.path.join(PET_SPACE_DIR, pet_space_fn)
+        pet_space_path = f"{PET_SPACE_DIR}/{pet_space_fn}" if os.path.isfile(pet_space_abs) else None
 
-        # QC is optional; if missing, fall back to full for qc_path
         full_path = f"{SUBPETS_DIR}/{full_fn}" if full_fn else None
-        qc_path = f"{SUBPETS_QC_DIR}/{qc_fn}" if qc_fn else full_path
 
         if full_path:
-            subjects.append({"id": sid, "qc_path": qc_path, "full_path": full_path})
+            subjects.append({
+                "id": sid,
+                "full_path": full_path,
+                "pet_space_path": pet_space_path,
+            })
 
     subjects.sort(key=lambda x: int(x["id"]))
     return subjects

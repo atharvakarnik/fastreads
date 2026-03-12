@@ -46,6 +46,18 @@
 
 <body>
   <div id="left">
+    <div class="label">View mode</div>
+    <div class="row" style="margin-top:6px;">
+      <label style="display:flex; align-items:center; gap:6px; font-size:12px; opacity:0.95;">
+        <input id="viewPet" type="radio" name="viewMode" value="PET" checked>
+        PET
+      </label>
+      <label style="display:flex; align-items:center; gap:6px; font-size:12px; opacity:0.95;">
+        <input id="viewMni" type="radio" name="viewMode" value="MNI">
+        MNI
+      </label>
+    </div>
+
     <div class="label">Subject</div>
     <div style="display:flex; align-items:center; gap:10px; margin-top:6px;">
       <div class="chip">ID: <span id="sid" class="mono">------</span></div>
@@ -65,21 +77,38 @@
 
     <div class="hr"></div>
 
-    <div class="label">PET opacity</div>
-    <input id="petOpacity" type="range" min="0" max="1" step="0.05" value="1.00">
-    <div class="status">Value: <span class="mono" id="petOpacityLabel">1.00</span></div>
+    <div id="mniOnlyControls">
+      <div class="label">PET opacity</div>
+      <input id="petOpacity" type="range" min="0" max="1" step="0.05" value="1.00">
+      <div class="status">Value: <span class="mono" id="petOpacityLabel">1.00</span></div>
 
-    <div class="hr"></div>
+      <div class="hr"></div>
 
-    <div class="label">MNI template controls</div>
-    <div class="row">
-      <label style="display:flex; align-items:center; gap:8px; font-size:12px; opacity:0.9;">
-        <input id="mniVisible" type="checkbox" checked>
-        Show MNI template
-      </label>
+      <div class="label">MNI template controls</div>
+      <div class="row">
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px; opacity:0.9;">
+          <input id="mniVisible" type="checkbox" checked>
+          Show MNI template
+        </label>
+      </div>
+      <input id="mniOpacity" type="range" min="0" max="1" step="0.05" value="1.00">
+      <div class="status">Value: <span class="mono" id="mniOpacityLabel">1.00</span></div>
+
+      <div class="hr"></div>
+
+      <details open>
+        <summary>VOI Controls (toggle + opacity)</summary>
+
+        <div style="margin-top:10px;">
+          <div class="label">All VOIs opacity</div>
+          <input id="masterOpacity" type="range" min="0" max="1" step="0.05" value="0.30">
+          <div class="status">Value: <span class="mono" id="masterOpacityLabel">0.30</span></div>
+        </div>
+
+        <div class="hr"></div>
+        <div id="voiControls"></div>
+      </details>
     </div>
-    <input id="mniOpacity" type="range" min="0" max="1" step="0.05" value="1.00">
-    <div class="status">Value: <span class="mono" id="mniOpacityLabel">1.00</span></div>
 
     <div class="hr"></div>
 
@@ -92,27 +121,13 @@
     </div>
 
     <div class="status" id="status"></div>
-
-    <div class="hr"></div>
-
-    <details open>
-      <summary>VOI Controls (toggle + opacity)</summary>
-
-      <div style="margin-top:10px;">
-        <div class="label">All VOIs opacity</div>
-        <input id="masterOpacity" type="range" min="0" max="1" step="0.05" value="0.30">
-        <div class="status">Value: <span class="mono" id="masterOpacityLabel">0.30</span></div>
-      </div>
-
-      <div class="hr"></div>
-      <div id="voiControls"></div>
-    </details>
   </div>
 
   <div id="viewerWrap">
     <div id="topBar">
-      <div class="chip">Template: <span class="mono">Atlases/avg152T1.nii.gz</span></div>
-      <div class="chip">PET: <span class="mono" id="petPathChip">-</span></div>
+      <div class="chip">View: <span class="mono" id="viewModeChip">PET</span></div>
+      <div class="chip" id="templateChip">Template: <span class="mono">Atlases/avg152T1.nii.gz</span></div>
+      <div class="chip">Source: <span class="mono" id="petPathChip">-</span></div>
       <div style="margin-left:auto" class="status" id="topStatus"></div>
     </div>
     <div id="gl"></div>
@@ -142,6 +157,7 @@
 
     const DEFAULT_VOI_OPACITY = 0.30;
     const LS_KEY = "PET_VIEWER_NOTES_FULL_ONLY_V2";
+    const VIEW = { PET: "PET", MNI: "MNI" };
 
     // ---------------- UI ----------------
     const sidEl = document.getElementById("sid");
@@ -149,7 +165,13 @@
     const scountEl = document.getElementById("scount");
     const statusEl = document.getElementById("status");
     const topStatusEl = document.getElementById("topStatus");
+    const viewModeChip = document.getElementById("viewModeChip");
+    const templateChip = document.getElementById("templateChip");
     const petPathChip = document.getElementById("petPathChip");
+
+    const viewPet = document.getElementById("viewPet");
+    const viewMni = document.getElementById("viewMni");
+    const mniOnlyControls = document.getElementById("mniOnlyControls");
 
     const notesEl = document.getElementById("notes");
     const gotoInput = document.getElementById("gotoInput");
@@ -288,13 +310,17 @@
 
     // ---------------- Data/caches ----------------
     const atlasCache = new Map(); // template + VOIs
-    const petCache = new Map();   // id->NVImage
+    const mniPetCache = new Map();   // id->NVImage (MNI view PET overlay)
+    const petSpaceCache = new Map(); // id->NVImage (PET view standalone)
+    let atlasLoaded = false;
 
     let subjects = []; // from /api/subjects
     let idx = 0;
     let currentId = null;
+    let currentView = VIEW.PET; // default at startup
 
     async function loadAtlasOnce() {
+      if (atlasLoaded) return;
       statusEl.textContent = "Loading atlases (one-time)...";
 
       atlasCache.set("template", await NVImage.loadFromUrl({ url: ATLAS.template }));
@@ -306,27 +332,45 @@
         atlasCache.set(v.key, img);
       }
 
+      atlasLoaded = true;
       statusEl.textContent = "Atlases loaded.";
     }
 
-    async function getPET(si) {
+    async function getMniPet(si) {
       const subj = subjects[si];
       if (!subj) return null;
       const id = subj.id;
-      if (petCache.has(id)) return petCache.get(id);
+      if (!subj.full_path) return null;
+      if (mniPetCache.has(id)) return mniPetCache.get(id);
       const img = await NVImage.loadFromUrl({ url: subj.full_path });
-      petCache.set(id, img);
+      mniPetCache.set(id, img);
       return img;
     }
 
-    function rebuildVolumes(templateImg, petImg) {
+    async function getPetSpace(si) {
+      const subj = subjects[si];
+      if (!subj) return null;
+      const id = subj.id;
+      if (!subj.pet_space_path) return null;
+      if (petSpaceCache.has(id)) return petSpaceCache.get(id);
+      const img = await NVImage.loadFromUrl({ url: subj.pet_space_path });
+      petSpaceCache.set(id, img);
+      return img;
+    }
+
+    function rebuildMniVolumes(templateImg, petImg) {
       removeAllVolumesCompat();
       nv.addVolume(templateImg); // index 0
       nv.addVolume(petImg);      // index 1
       for (const v of VOIS) nv.addVolume(atlasCache.get(v.key)); // index 2+
     }
 
-    function applyAllDisplaySettings() {
+    function rebuildPetOnlyVolumes(petImg) {
+      removeAllVolumesCompat();
+      nv.addVolume(petImg); // index 0
+    }
+
+    function applyMniDisplaySettings() {
       // Ensure volumes exist before setting properties
       if (volCount() < 2 + VOIS.length) return;
 
@@ -337,9 +381,18 @@
       // PET in grayscale
       setColormapSafe(1, "gray");
       setOpacitySafe(1, parseFloat(petOpacity.value));
+      refresh();
+    }
+
+    function applyPetOnlyDisplaySettings() {
+      if (volCount() < 1) return;
+      setColormapSafe(0, "gray");
+      setOpacitySafe(0, 1.0);
+      refresh();
     }
 
     function applyVoiStateToViewer() {
+      if (currentView !== VIEW.MNI) return;
       if (volCount() < 2 + VOIS.length) return;
       for (let i=0; i<VOIS.length; i++) {
         const vi = 2 + i;
@@ -364,7 +417,7 @@
 
         const left = document.createElement("div");
         left.innerHTML = `<div class="voiName">${v.label}</div>
-                          <div class="voiMeta">Color: <span class="mono">${v.cmap}</span></div>`;
+                          <div class="voiMeta">Color: <span class="mono">${v.uiHex}</span></div>`;
 
         const toggle = document.createElement("input");
         toggle.type = "checkbox";
@@ -422,24 +475,52 @@
     petOpacity.addEventListener("input", () => {
       const val = parseFloat(petOpacity.value);
       petOpacityLabel.textContent = val.toFixed(2);
+      if (currentView !== VIEW.MNI) return;
       // PET is index 1
       setOpacitySafe(1, val);
       refresh();
     });
 
     mniOpacity.addEventListener("input", () => {
-    const val = parseFloat(mniOpacity.value);
-    mniOpacityLabel.textContent = val.toFixed(2);
-    // MNI template is index 0
-    setOpacitySafe(0, mniVisible.checked ? val : 0.0);
-    refresh();
-  });
+      const val = parseFloat(mniOpacity.value);
+      mniOpacityLabel.textContent = val.toFixed(2);
+      if (currentView !== VIEW.MNI) return;
+      // MNI template is index 0
+      setOpacitySafe(0, mniVisible.checked ? val : 0.0);
+      refresh();
+    });
 
-  mniVisible.addEventListener("change", () => {
-    const val = parseFloat(mniOpacity.value);
-    setOpacitySafe(0, mniVisible.checked ? val : 0.0);
-    refresh();
-  });
+    mniVisible.addEventListener("change", () => {
+      if (currentView !== VIEW.MNI) return;
+      const val = parseFloat(mniOpacity.value);
+      setOpacitySafe(0, mniVisible.checked ? val : 0.0);
+      refresh();
+    });
+
+    function setViewUiState() {
+      const isMni = currentView === VIEW.MNI;
+      viewModeChip.textContent = currentView;
+      templateChip.style.display = isMni ? "" : "none";
+      mniOnlyControls.style.display = isMni ? "" : "none";
+      viewPet.checked = !isMni;
+      viewMni.checked = isMni;
+    }
+
+    async function setViewMode(nextView) {
+      if (nextView !== VIEW.PET && nextView !== VIEW.MNI) return;
+      if (nextView === currentView) return;
+      currentView = nextView;
+      setViewUiState();
+      await loadSubjectByIndex(idx);
+    }
+
+    viewPet.addEventListener("change", () => {
+      if (viewPet.checked) setViewMode(VIEW.PET);
+    });
+
+    viewMni.addEventListener("change", () => {
+      if (viewMni.checked) setViewMode(VIEW.MNI);
+    });
 
     // ---------------- Navigation ----------------
     function findIndexById(id){ return subjects.findIndex(s => s.id === id); }
@@ -455,25 +536,47 @@
       scountEl.textContent = String(subjects.length);
 
       notesEl.value = (notesMap[currentId] ?? "");
-      petPathChip.textContent = (subj.full_path || "").split("/").pop();
-      topStatusEl.textContent = subj.full_path || "";
-
-      statusEl.textContent = "Loading FULL PET...";
       try {
+        if (currentView === VIEW.PET) {
+          const expectedPath = `PET_Space/${subj.id}_PET_3D.nii`;
+          petPathChip.textContent = (subj.pet_space_path || expectedPath).split("/").pop();
+          topStatusEl.textContent = subj.pet_space_path || `Missing file: ${expectedPath}`;
+          statusEl.textContent = "Loading PET-space volume...";
+
+          const petSpaceImg = await getPetSpace(idx);
+          if (!petSpaceImg) {
+            removeAllVolumesCompat();
+            statusEl.textContent = `PET view missing file: ${expectedPath}`;
+            return;
+          }
+
+          rebuildPetOnlyVolumes(petSpaceImg);
+          await new Promise(r => requestAnimationFrame(r));
+          applyPetOnlyDisplaySettings();
+          statusEl.textContent = "Ready (PET view).";
+          return;
+        }
+
+        petPathChip.textContent = (subj.full_path || "").split("/").pop();
+        topStatusEl.textContent = subj.full_path || "";
+        statusEl.textContent = "Loading MNI view...";
+
+        await loadAtlasOnce();
         const templateImg = atlasCache.get("template");
-        const petImg = await getPET(idx);
+        const petImg = await getMniPet(idx);
         if (!templateImg || !petImg) { statusEl.textContent = "Missing template or PET."; return; }
 
-        rebuildVolumes(templateImg, petImg);
+        rebuildMniVolumes(templateImg, petImg);
 
         // Important: wait one tick so nv.volumes is populated in this Niivue build
         await new Promise(r => requestAnimationFrame(r));
 
-        applyAllDisplaySettings();
-        statusEl.textContent = "Ready.";
+        applyMniDisplaySettings();
+        applyVoiStateToViewer();
+        statusEl.textContent = "Ready (MNI view).";
       } catch (e) {
         console.error(e);
-        statusEl.textContent = "ERROR loading PET (see console).";
+        statusEl.textContent = "ERROR loading volume (see console).";
       }
     }
 
@@ -532,8 +635,12 @@
         const rs = await fetch("/api/subjects");
         const js = await rs.json();
 
-        // server returns {id, qc_path, full_path} — we only use full_path
-        subjects = (js.subjects || []).map(s => ({ id: s.id, full_path: s.full_path }));
+        // server returns {id, full_path, pet_space_path}
+        subjects = (js.subjects || []).map(s => ({
+          id: s.id,
+          full_path: s.full_path,
+          pet_space_path: s.pet_space_path || null
+        }));
         if (!subjects.length) { statusEl.textContent = "No PETs found in subPETs/."; return; }
         scountEl.textContent = String(subjects.length);
 
@@ -550,7 +657,7 @@
         initVoiState(DEFAULT_VOI_OPACITY);
         buildVoiControls();
 
-        await loadAtlasOnce();
+        setViewUiState();
         await loadSubjectByIndex(0);
       } catch (e) {
         console.error(e);
