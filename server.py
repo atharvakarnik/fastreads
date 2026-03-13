@@ -11,67 +11,53 @@ SUBPETS_DIR = "subPETs"
 PET_SPACE_DIR = "PET_Space"
 NOTES_CSV = "notes.csv"
 
-ID_RE = re.compile(r"w(\d{6})", re.IGNORECASE)
+SUBPETS_ID_RE = re.compile(r"^w(\d+)_PET_3D\.nii(?:\.gz)?$", re.IGNORECASE)
+PET_SPACE_ID_RE = re.compile(r"^(\d+)_PET_3D\.nii(?:\.gz)?$", re.IGNORECASE)
 VALID_EXT = (".nii", ".nii.gz")
 
 
-def _pick_best_file(folder, sid):
-    """
-    Choose a PET file for a given ID in a folder.
-    Preference: .nii (faster to decode) > .nii.gz
-    """
-    if not os.path.isdir(folder):
-        return None
+def _is_better_file(candidate, current):
+    if current is None:
+        return True
+    candidate_key = (0 if candidate.lower().endswith(".nii") else 1, candidate)
+    current_key = (0 if current.lower().endswith(".nii") else 1, current)
+    return candidate_key < current_key
 
-    candidates = []
-    for fn in os.listdir(folder):
-        lower = fn.lower()
+
+def _index_pet_files(folder, pattern):
+    indexed = {}
+    if not os.path.isdir(folder):
+        return indexed
+
+    for entry in os.scandir(folder):
+        if not entry.is_file():
+            continue
+        lower = entry.name.lower()
         if not lower.endswith(VALID_EXT):
             continue
-        m = ID_RE.search(fn)
-        if not m:
+        match = pattern.match(entry.name)
+        if not match:
             continue
-        if m.group(1) != sid:
-            continue
-        candidates.append(fn)
-
-    if not candidates:
-        return None
-
-    # Prefer .nii over .nii.gz
-    candidates.sort(key=lambda x: (0 if x.lower().endswith(".nii") else 1, x))
-    return candidates[0]
+        sid = match.group(1)
+        current = indexed.get(sid)
+        if _is_better_file(entry.name, current):
+            indexed[sid] = entry.name
+    return indexed
 
 
 def list_subjects():
-    # Build set of IDs from full-res folder
-    ids = set()
-    if os.path.isdir(SUBPETS_DIR):
-        for fn in os.listdir(SUBPETS_DIR):
-            lower = fn.lower()
-            if not lower.endswith(VALID_EXT):
-                continue
-            m = ID_RE.search(fn)
-            if m:
-                ids.add(m.group(1))
-
+    full_files = _index_pet_files(SUBPETS_DIR, SUBPETS_ID_RE)
+    pet_space_files = _index_pet_files(PET_SPACE_DIR, PET_SPACE_ID_RE)
     subjects = []
-    for sid in ids:
-        full_fn = _pick_best_file(SUBPETS_DIR, sid)
-        pet_space_fn = f"{sid}_PET_3D.nii"
-        pet_space_abs = os.path.join(PET_SPACE_DIR, pet_space_fn)
-        pet_space_path = f"{PET_SPACE_DIR}/{pet_space_fn}" if os.path.isfile(pet_space_abs) else None
+    for sid, full_fn in full_files.items():
+        pet_space_fn = pet_space_files.get(sid)
+        subjects.append({
+            "id": sid,
+            "full_path": f"{SUBPETS_DIR}/{full_fn}",
+            "pet_space_path": f"{PET_SPACE_DIR}/{pet_space_fn}" if pet_space_fn else None,
+        })
 
-        full_path = f"{SUBPETS_DIR}/{full_fn}" if full_fn else None
-
-        if full_path:
-            subjects.append({
-                "id": sid,
-                "full_path": full_path,
-                "pet_space_path": pet_space_path,
-            })
-
-    subjects.sort(key=lambda x: int(x["id"]))
+    subjects.sort(key=lambda x: (int(x["id"]), x["id"]))
     return subjects
 
 
@@ -98,7 +84,7 @@ def write_notes_csv(notes_map, subject_ids=None):
         for sid in subject_ids:
             rows.append({"ID": sid, "IN_Notes": notes_map.get(sid, "")})
     else:
-        for sid in sorted(notes_map.keys(), key=lambda x: int(x)):
+        for sid in sorted(notes_map.keys(), key=lambda x: (int(x), x)):
             rows.append({"ID": sid, "IN_Notes": notes_map.get(sid, "")})
 
     with open(NOTES_CSV, "w", encoding="utf-8", newline="") as f:
@@ -145,15 +131,17 @@ class Handler(SimpleHTTPRequestHandler):
             if not isinstance(notes_map, dict):
                 return self._send_json({"ok": False, "error": "notes must be an object/dict"}, status=400)
 
+            subjects = list_subjects()
+            subject_ids = [s["id"] for s in subjects]
+            subject_id_set = set(subject_ids)
+
             cleaned = {}
             for k, v in notes_map.items():
                 sid = str(k).strip()
-                if not re.fullmatch(r"\d{6}", sid):
+                if sid not in subject_id_set:
                     continue
                 cleaned[sid] = "" if v is None else str(v)
 
-            subjects = list_subjects()
-            subject_ids = [s["id"] for s in subjects]
             write_notes_csv(cleaned, subject_ids=subject_ids)
 
             return self._send_json({"ok": True, "written": NOTES_CSV, "count": len(cleaned)})

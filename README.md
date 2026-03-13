@@ -59,19 +59,41 @@ fastreads/
 │   ├── voi_CerebGry_2mm.nii.gz
 │   └── voi_WhlCblBrnStm_2mm.nii.gz
 ├── subPETs/
-│   ├── w011002_PET_3D.nii
-│   ├── w011005_PET_3D.nii
+│   ├── w23_PET_3D.nii
+│   ├── w24_PET_3D.nii
 │   └── ...
 └── PET_Space/
-    ├── 011002_PET_3D.nii
-    ├── 011005_PET_3D.nii
+    ├── 23_PET_3D.nii
+    ├── 24_PET_3D.nii
     └── ...
 ```
 
-Input naming conventions:
+## Input filename and ID rules
 
-- `subPETs/`: filenames should include ID as `wXXXXXX` (for example, `w011002_PET_3D.nii`).
-- `PET_Space/`: filenames should follow `XXXXXX_PET_3D.nii` (for example, `011002_PET_3D.nii`).
+The viewer does not require 6-digit IDs anymore. It works with any numeric ID length, as long as the filenames match the expected PET naming pattern exactly.
+
+Accepted filename patterns:
+
+- `subPETs/`: `w<ID>_PET_3D.nii` or `w<ID>_PET_3D.nii.gz`
+- `PET_Space/`: `<ID>_PET_3D.nii` or `<ID>_PET_3D.nii.gz`
+
+Where:
+
+- `<ID>` must be digits only
+- the same `<ID>` should be used across both folders for the same subject
+- the viewer derives the subject ID from the numeric portion of the filename
+
+Examples:
+
+- `subPETs/w23_PET_3D.nii` pairs with `PET_Space/23_PET_3D.nii`
+- `subPETs/w011002_PET_3D.nii.gz` pairs with `PET_Space/011002_PET_3D.nii.gz`
+
+Important constraints:
+
+- Files that do not match these patterns are ignored by `server.py`.
+- Subjects are discovered from `subPETs/`. If a subject is missing from `subPETs/`, it will not appear in the viewer.
+- `PET_Space/` is optional per subject for PET view, but if its matching file is missing then that subject cannot be shown in PET mode.
+- The "Go to ID" field in `viewer.html` uses the first discovered subject ID to show the example digit count and example ID.
 
 ## Run it
 
