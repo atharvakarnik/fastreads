@@ -1,5 +1,5 @@
 # data folders
-subPETs/
+# subPETs/ # Has opensource data
 SPM_Outputs/
 ANTs_Outputs/
 subPETs_forIlyaReview/

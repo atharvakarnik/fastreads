@@ -124,6 +124,8 @@ This is a simple, portable QC viewer for browsing PET-space and MNI-space PET sc
 
 This project includes the following third-party component:
 
+### Software 
+
 NiiVue (https://github.com/niivue/niivue)
 
 File used:
@@ -134,3 +136,11 @@ BSD 2-Clause License
 
 Copyright (c) 2021, Niivue
 All rights reserved.
+
+### Data 
+
+Example PET images used in this repository come from the OpenNeuro dataset  
+**"Cerebral tau deposition in young healthy adults using [18F]MK6240 PET"**  
+https://openneuro.org/datasets/ds006756
+
+Used only **5 subjects** for demo. I would have preferred to use my own data where physicians use it, but workplace data policies (rightfully) have other plans — so public CC0 data to the rescue.
