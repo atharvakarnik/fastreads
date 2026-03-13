@@ -3,6 +3,7 @@ subPETs/
 SPM_Outputs/
 ANTs_Outputs/
 subPETs_forIlyaReview/
+PET_Space/
 
 # OS/editor clutter
 .DS_Store

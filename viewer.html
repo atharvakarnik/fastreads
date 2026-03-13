@@ -69,9 +69,9 @@
       <button id="nextBtn">Next →</button>
     </div>
 
-    <div class="label" style="margin-top:6px;">Go to ID (6 digits)</div>
+    <div class="label" style="margin-top:6px;">Go to ID (<span id="gotoDigits">?</span> digits)</div>
     <div class="row">
-      <input id="gotoInput" class="mono" placeholder="e.g., 011002" maxlength="6" type="text" />
+      <input id="gotoInput" class="mono" placeholder="Loading IDs..." type="text" />
       <button id="goBtn">Go</button>
     </div>
 
@@ -187,6 +187,7 @@
 
     const notesEl = document.getElementById("notes");
     const gotoInput = document.getElementById("gotoInput");
+    const gotoDigits = document.getElementById("gotoDigits");
 
     const prevBtn = document.getElementById("prevBtn");
     const nextBtn = document.getElementById("nextBtn");
@@ -335,6 +336,16 @@
     let idx = 0;
     let currentId = null;
     let currentView = VIEW.PET; // default at startup
+    let defaultSearchId = "";
+    let defaultSearchIdDigits = null;
+
+    function configureIdSearchUi() {
+      defaultSearchId = subjects[0]?.id || "";
+      defaultSearchIdDigits = defaultSearchId.length || null;
+      gotoDigits.textContent = defaultSearchIdDigits ? String(defaultSearchIdDigits) : "?";
+      gotoInput.placeholder = defaultSearchId ? `e.g., ${defaultSearchId}` : "Enter subject ID";
+      gotoInput.maxLength = defaultSearchId ? defaultSearchId.length : 32;
+    }
 
     async function loadAtlasOnce() {
       if (atlasLoaded) return;
@@ -625,9 +636,17 @@
 
     goBtn.addEventListener("click", () => {
       const id = (gotoInput.value || "").trim();
-      if (!/^\d{6}$/.test(id)) { statusEl.textContent = "Enter a 6-digit ID."; return; }
+      if (!id) {
+        const digitText = defaultSearchIdDigits ? `${defaultSearchIdDigits}-digit ` : "";
+        statusEl.textContent = `Enter a ${digitText}ID${defaultSearchId ? ` like ${defaultSearchId}` : ""}.`;
+        return;
+      }
       const j = findIndexById(id);
-      if (j < 0) { statusEl.textContent = `ID ${id} not found.`; return; }
+      if (j < 0) {
+        const hint = defaultSearchId ? ` Example: ${defaultSearchId}.` : "";
+        statusEl.textContent = `ID ${id} not found.${hint}`;
+        return;
+      }
       loadSubjectByIndex(j);
     });
 
@@ -666,6 +685,7 @@
           pet_space_path: s.pet_space_path || null
         }));
         if (!subjects.length) { statusEl.textContent = "No PETs found in subPETs/."; return; }
+        configureIdSearchUi();
         scountEl.textContent = String(subjects.length);
 
         // merge notes.csv from server into local (local wins)
