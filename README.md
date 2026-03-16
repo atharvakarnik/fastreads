@@ -128,7 +128,9 @@ Then open:
 - keep the server window open while using the viewer
 - notes can be written to `notes.csv`
 
-## Third-party libraries
+ License : MIT (applies to source code in this repo. 3rd party resources retain their original license)
+
+## Third-party resources
 
 ### Software
 
