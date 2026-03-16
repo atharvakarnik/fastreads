@@ -2,61 +2,52 @@
 
 A lightweight local NIfTI viewer for physician/neuroimaging visual reads in a web browser, without needing a full neuroimaging workstation setup.
 
-It supports two review modes:
+Supports two review modes:
 
-- **PET view**: PET-space subject volume only, with a PET-only grayscale inversion toggle.
+-  **PET view**: PET-space subject volume only, with a PET-only grayscale inversion toggle.
 - **MNI view**: MNI-normalized PET with an MNI template and Centiloid-style VOI overlays.
 
-The viewer runs entirely on your own machine and includes subject navigation, overlay controls, and per-subject notes saved to `notes.csv`.
+Everything runs locally. You can move through subjects, adjust overlays, and save notes to `notes.csv`.
 
 ## What it does
 
-This project lets you:
+- switch between **PET** and **MNI**
+- review PET-space scans with invert-on/off control
+- review MNI-space PET over the template
+- show standard VOI masks in MNI view
+- adjust opacity and visibility for PET, template, and VOIs
+- jump to a subject ID or step through the list
+- save per-subject notes
 
-- switch between **PET** and **MNI** viewing modes
-- view PET-space scans with inverted grayscale support
-- view MNI-space PET scans over the template
-- overlay standard VOI masks in distinct colors
-- control opacity and visibility for PET, template, and VOIs
-- move subject-by-subject or jump directly to a specific ID
-- enter and save QC notes to `notes.csv`
+This viewer is for review and annotation, not processing.
 
-The viewer is for inspection and annotation, not image processing.
+## Demo data vs your own data
 
-## Demo data and your own data
+The repo includes a small demo dataset in `Example/`.
 
-This repository currently ships with demo data inside `Example/`.
+The app looks for data in this order:
 
-At runtime, the app resolves data folders like this:
+- root `PET_MNI/`, otherwise `Example/PET_MNI/`
+- root `PET_Space/`, otherwise `Example/PET_Space/`
 
-- prefer root `PET_MNI/`, otherwise use `Example/PET_MNI/`
-- prefer root `PET_Space/`, otherwise use `Example/PET_Space/`
+So the demo works out of the box, but your own root folders take priority if they exist.
 
-This means the repository works out of the box with the demo dataset, but your own data takes precedence as soon as you create the root folders.
+To try your own data:
 
-To test this on your own data:
+- put MNI-space PETs in root `PET_MNI/`
+- put PET-space scans in root `PET_Space/`
 
-- store MNI-space PETs in root `PET_MNI/`
-- store PET-space subject scans in root `PET_Space/`
+Fallback is based on folder existence, not file validity. If root `PET_MNI/` exists but is empty or misnamed, the app will not fall back to the demo folder.
 
-Important: fallback is based on folder existence, not whether files were found. If root `PET_MNI/` exists but is empty or contains invalid filenames, the app will not fall back to `Example/PET_MNI/`.
-
-## What to expect
-
-When launched, the viewer opens a local webpage with:
+## What you will see
 
 - **PET mode**
-  - one PET-space subject volume
-  - PET-only invert toggle
+  - one PET-space scan
+  - invert toggle for grayscale display
 - **MNI mode**
-  - the MNI template
-  - one subject PET volume from the resolved `PET_MNI/` folder
-  - the following VOI overlays:
-    - Whole Cerebellum
-    - Cortex
-    - Pons
-    - Cerebellar Gray
-    - Whole Cerebellum + Brainstem
+  - MNI template
+  - one scan from the resolved `PET_MNI/` folder
+  - VOIs for Whole Cerebellum, Cortex, Pons, Cerebellar Gray, and Whole Cerebellum + Brainstem
 
 ## Project layout
 
@@ -76,43 +67,41 @@ fastreads/
 │   └── voi_WhlCblBrnStm_2mm.nii.gz
 ├── Example/
 │   ├── PET_MNI/
-│   │   ├── w23_PET_3D.nii
-│   │   ├── w24_PET_3D.nii
+│   │   ├── w23_PET_3D.nii.gz
+│   │   ├── w24_PET_3D.nii.gz
 │   │   └── ...
 │   └── PET_Space/
-│       ├── 23_PET_3D.nii
-│       ├── 24_PET_3D.nii
+│       ├── 23_PET_3D.nii.gz
+│       ├── 24_PET_3D.nii.gz
 │       └── ...
-├── PET_MNI/        # optional private data at root, preferred when present
-└── PET_Space/      # optional private data at root, preferred when present
+├── PET_MNI/        # To store your cohort 3D PET-MNI normalized
+└── PET_Space/      # To store your cohort 3D PET
 ```
 
-## Input filename and ID rules
+## Filename rules
 
-The viewer works with any numeric ID length, as long as filenames match the expected pattern exactly.
-
-Accepted filename patterns:
+The viewer accepts any numeric ID length as long as the filenames match exactly:
 
 - `PET_MNI/`: `w<ID>_PET_3D.nii` or `w<ID>_PET_3D.nii.gz`
 - `PET_Space/`: `<ID>_PET_3D.nii` or `<ID>_PET_3D.nii.gz`
 
-Where:
+Rules:
 
 - `<ID>` must be digits only
-- the same `<ID>` should be used across both folders for the same subject
-- the viewer derives the subject ID from the numeric portion of the filename
+- use the same `<ID>` in both folders for the same subject
+- the app extracts the subject ID from the filename
 
 Examples:
 
-- `PET_MNI/w23_PET_3D.nii` pairs with `PET_Space/23_PET_3D.nii`
-- `PET_MNI/w011002_PET_3D.nii.gz` pairs with `PET_Space/011002_PET_3D.nii.gz`
+- `PET_MNI/w23_PET_3D.nii.gz` pairs with `PET_Space/23_PET_3D.nii.gz`
+- `PET_MNI/w011002_PET_3D.nii` pairs with `PET_Space/011002_PET_3D.nii`
 
-Important constraints:
+Notes:
 
-- files that do not match these patterns are ignored by `server.py`
+- files that do not match the pattern are ignored
 - subjects are discovered from the resolved `PET_MNI/` folder
-- `PET_Space/` is optional per subject, but PET view cannot load a subject if its matching PET-space file is missing
-- the "Go to ID" field in `viewer.html` uses the first discovered subject ID to show the example digit count
+- `PET_Space/` can be missing for a subject, but PET view will not load for that subject
+- the "Go to ID" box uses the first discovered ID as its example
 
 ## Run it
 
@@ -122,40 +111,40 @@ Double-click `Start_Viewer.bat`
 
 ### macOS
 
-Open Terminal in the project folder and run `bash Start_Viewer.sh`
+Run:
 
-The viewer opens at:
+```bash
+bash Start_Viewer.sh
+```
+
+Then open:
 
 `http://127.0.0.1:8000/viewer.html`
 
 ## Notes
 
-- Python 3 is required
-- no extra Python packages are needed
-- keep the terminal/server window open while using the viewer
-- notes entered in the viewer can be exported to `notes.csv`
+- Python 3 required
+- no extra Python packages
+- keep the server window open while using the viewer
+- notes can be written to `notes.csv`
 
 ## Third-party libraries
 
-This project includes the following third-party component:
-
 ### Software
 
-NiiVue (https://github.com/niivue/niivue)
+NiiVue  
+https://github.com/niivue/niivue
 
-File used:
-`niivue.umd.js`
-
-License:
-BSD 2-Clause License
+File used: `niivue.umd.js`  
+License: BSD 2-Clause License
 
 Copyright (c) 2021, Niivue
 All rights reserved.
 
 ### Data
 
-Example PET images used in this repository come from the OpenNeuro dataset  
+Example PET images come from the OpenNeuro dataset:  
 **"Cerebral tau deposition in young healthy adults using [18F]MK6240 PET"**  
 https://openneuro.org/datasets/ds006756
 
-Used only 5 subjects for demo.
+This repo includes 5 subjects for demo use.
