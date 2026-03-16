@@ -4,15 +4,16 @@ A lightweight local NIfTI viewer for physician/neuroimaging visual reads in a we
 
 Supports two review modes:
 
--  **PET view**: PET-space subject volume only, with a PET-only grayscale inversion toggle.
-- **MNI view**: MNI-normalized PET with an MNI template and Centiloid-style VOI overlays.
+-  **PET view**: PET-space subject volume only, with grayscale inversion and PET intensity min/max controls.
+- **MNI view**: MNI-normalized PET with an MNI template, Centiloid-style VOI overlays, and the same PET intensity min/max controls.
 
-Everything runs locally. You can move through subjects, adjust overlays, and save notes to `notes.csv`.
+Everything runs locally. You can move through subjects, adjust PET display range and overlays, and save notes to `notes.csv`.
 
 ## What it does
 
 - switch between **PET** and **MNI**
 - review PET-space scans with invert-on/off control
+- adjust PET intensity min/max in either view
 - review MNI-space PET over the template
 - show standard VOI masks in MNI view
 - adjust opacity and visibility for PET, template, and VOIs
@@ -44,9 +45,11 @@ Fallback is based on folder existence, not file validity. If root `PET_MNI/` exi
 - **PET mode**
   - one PET-space scan
   - invert toggle for grayscale display
+  - PET intensity min/max controls
 - **MNI mode**
   - MNI template
   - one scan from the resolved `PET_MNI/` folder
+  - PET intensity min/max controls shared with PET mode for the current subject
   - VOIs for Whole Cerebellum, Cortex, Pons, Cerebellar Gray, and Whole Cerebellum + Brainstem
 
 ## Project layout

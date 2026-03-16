@@ -32,6 +32,11 @@
     .chip { font-size:12px; padding:4px 8px; border-radius:999px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12); }
     .status { font-size:12px; opacity:0.85; line-height:1.35; }
     .hr { height:1px; background:rgba(255,255,255,0.08); margin:12px 0; }
+    .rangeGrid { display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap:8px; margin-top:6px; align-items:end; }
+    .rangeField { display:flex; flex-direction:column; gap:6px; min-width:0; }
+    .rangeField span { font-size:12px; opacity:0.9; }
+    .rangeField input[type="number"] { width:100%; box-sizing:border-box; }
+    .smallBtn { padding:10px; }
 
     details summary { cursor:pointer; user-select:none; font-weight:600; }
 
@@ -73,6 +78,24 @@
     <div class="row">
       <input id="gotoInput" class="mono" placeholder="Loading IDs..." type="text" />
       <button id="goBtn">Go</button>
+    </div>
+
+    <div class="hr"></div>
+
+    <div>
+      <div class="label">PET intensity range</div>
+      <div class="rangeGrid">
+        <label class="rangeField">
+          <span>Min</span>
+          <input id="petRangeMin" class="mono" type="number" step="any" inputmode="decimal" disabled>
+        </label>
+        <label class="rangeField">
+          <span>Max</span>
+          <input id="petRangeMax" class="mono" type="number" step="any" inputmode="decimal" disabled>
+        </label>
+        <button id="petRangeReset" class="smallBtn" type="button" disabled>Auto</button>
+      </div>
+      <div class="status">Adjust the displayed PET calibration range for the current subject.</div>
     </div>
 
     <div class="hr"></div>
@@ -184,6 +207,9 @@
     const petOnlyControls = document.getElementById("petOnlyControls");
     const mniOnlyControls = document.getElementById("mniOnlyControls");
     const petInvert = document.getElementById("petInvert");
+    const petRangeMin = document.getElementById("petRangeMin");
+    const petRangeMax = document.getElementById("petRangeMax");
+    const petRangeReset = document.getElementById("petRangeReset");
 
     const notesEl = document.getElementById("notes");
     const gotoInput = document.getElementById("gotoInput");
@@ -220,6 +246,61 @@
       for (const v of VOIS) voiState[v.key] = { visible: true, opacity: op };
       masterOpacity.value = String(op);
       masterOpacityLabel.textContent = op.toFixed(2);
+    }
+
+    // ---------------- PET intensity range state ----------------
+    const petImageDefaultRanges = new WeakMap();
+    let petRangeState = {
+      subjectId: null,
+      overrideRange: null,
+      defaultRangeByView: { [VIEW.PET]: null, [VIEW.MNI]: null },
+      appliedRange: null,
+    };
+
+    function cloneRange(range) {
+      return range ? { min: range.min, max: range.max } : null;
+    }
+
+    function parseFiniteNumber(value) {
+      const text = `${value ?? ""}`.trim();
+      if (!text) return null;
+      const num = Number(text);
+      return Number.isFinite(num) ? num : null;
+    }
+
+    function makeRange(min, max) {
+      return Number.isFinite(min) && Number.isFinite(max) && min < max
+        ? { min, max }
+        : null;
+    }
+
+    function formatRangeNumber(value) {
+      if (!Number.isFinite(value)) return "";
+      const abs = Math.abs(value);
+      if ((abs >= 10000 || (abs > 0 && abs < 0.001))) return value.toPrecision(6);
+      return String(Number(value.toFixed(4)));
+    }
+
+    function syncPetRangeInputs(range) {
+      petRangeMin.value = range ? formatRangeNumber(range.min) : "";
+      petRangeMax.value = range ? formatRangeNumber(range.max) : "";
+    }
+
+    function setPetRangeControlsEnabled(enabled) {
+      petRangeMin.disabled = !enabled;
+      petRangeMax.disabled = !enabled;
+      petRangeReset.disabled = !enabled;
+    }
+
+    function resetPetRangeState(subjectId) {
+      petRangeState = {
+        subjectId,
+        overrideRange: null,
+        defaultRangeByView: { [VIEW.PET]: null, [VIEW.MNI]: null },
+        appliedRange: null,
+      };
+      syncPetRangeInputs(null);
+      setPetRangeControlsEnabled(false);
     }
 
     // ---------------- Niivue ----------------
@@ -317,6 +398,84 @@
       try { nv.updateGLVolume && nv.updateGLVolume(); } catch {}
     }
 
+    function activePetVolumeIndex(view=currentView) {
+      if (view === VIEW.PET) return volCount() >= 1 ? 0 : -1;
+      if (view === VIEW.MNI) return volCount() >= 2 ? 1 : -1;
+      return -1;
+    }
+
+    function readImageRange(img, minKey, maxKey) {
+      const mn = parseFiniteNumber(img?.[minKey]);
+      const mx = parseFiniteNumber(img?.[maxKey]);
+      return makeRange(mn, mx);
+    }
+
+    function rememberPetImageDefaultRange(img) {
+      if (!img) return null;
+      const cached = petImageDefaultRanges.get(img);
+      if (cached) return cloneRange(cached);
+
+      const range = readImageRange(img, "cal_min", "cal_max")
+        || readImageRange(img, "robust_min", "robust_max")
+        || readImageRange(img, "global_min", "global_max");
+
+      if (range) petImageDefaultRanges.set(img, cloneRange(range));
+      return cloneRange(range);
+    }
+
+    function displayedPetRangeForView(view=currentView) {
+      return cloneRange(
+        petRangeState.overrideRange
+        || petRangeState.defaultRangeByView[view]
+        || petRangeState.appliedRange
+      );
+    }
+
+    function refreshPetRangeUi() {
+      syncPetRangeInputs(displayedPetRangeForView(currentView));
+      setPetRangeControlsEnabled(activePetVolumeIndex() >= 0 && !!displayedPetRangeForView(currentView));
+    }
+
+    function applyPetRangeToActiveVolume() {
+      const volumeIndex = activePetVolumeIndex();
+      const range = displayedPetRangeForView(currentView);
+      if (volumeIndex < 0 || !range) {
+        petRangeState.appliedRange = null;
+        refreshPetRangeUi();
+        return false;
+      }
+
+      setCalibrationSafe(volumeIndex, range.min, range.max);
+      petRangeState.appliedRange = cloneRange(range);
+      refreshPetRangeUi();
+      return true;
+    }
+
+    function updatePetRangeForLoadedImage(view, img) {
+      petRangeState.defaultRangeByView[view] = rememberPetImageDefaultRange(img);
+      applyPetRangeToActiveVolume();
+    }
+
+    function readPetRangeInputs() {
+      return makeRange(
+        parseFiniteNumber(petRangeMin.value),
+        parseFiniteNumber(petRangeMax.value)
+      );
+    }
+
+    function applyManualPetRangeFromInputs() {
+      const range = readPetRangeInputs();
+      if (!range) return false;
+      petRangeState.overrideRange = cloneRange(range);
+      const applied = applyPetRangeToActiveVolume();
+      if (applied) refresh();
+      return applied;
+    }
+
+    function syncPetRangeInputsToApplied() {
+      syncPetRangeInputs(displayedPetRangeForView(currentView));
+    }
+
     function removeAllVolumesCompat() {
       if (typeof nv.removeAllVolumes === "function") { nv.removeAllVolumes(); return; }
       if (typeof nv.removeVolume === "function" && Array.isArray(nv.volumes)) {
@@ -369,8 +528,13 @@
       if (!subj) return null;
       const id = subj.id;
       if (!subj.full_path) return null;
-      if (mniPetCache.has(id)) return mniPetCache.get(id);
+      if (mniPetCache.has(id)) {
+        const cached = mniPetCache.get(id);
+        rememberPetImageDefaultRange(cached);
+        return cached;
+      }
       const img = await NVImage.loadFromUrl({ url: subj.full_path });
+      rememberPetImageDefaultRange(img);
       mniPetCache.set(id, img);
       return img;
     }
@@ -380,8 +544,13 @@
       if (!subj) return null;
       const id = subj.id;
       if (!subj.pet_space_path) return null;
-      if (petSpaceCache.has(id)) return petSpaceCache.get(id);
+      if (petSpaceCache.has(id)) {
+        const cached = petSpaceCache.get(id);
+        rememberPetImageDefaultRange(cached);
+        return cached;
+      }
       const img = await NVImage.loadFromUrl({ url: subj.pet_space_path });
+      rememberPetImageDefaultRange(img);
       petSpaceCache.set(id, img);
       return img;
     }
@@ -409,6 +578,7 @@
       // PET in grayscale
       setColormapSafe(1, "gray");
       setOpacitySafe(1, parseFloat(petOpacity.value));
+      applyPetRangeToActiveVolume();
       refresh();
     }
 
@@ -417,6 +587,7 @@
       setColormapSafe(0, "gray");
       setColormapInvertSafe(0, petInvert.checked);
       setOpacitySafe(0, 1.0);
+      applyPetRangeToActiveVolume();
       refresh();
     }
 
@@ -531,6 +702,27 @@
       applyPetOnlyDisplaySettings();
     });
 
+    petRangeMin.addEventListener("input", () => {
+      applyManualPetRangeFromInputs();
+    });
+
+    petRangeMax.addEventListener("input", () => {
+      applyManualPetRangeFromInputs();
+    });
+
+    petRangeMin.addEventListener("blur", () => {
+      if (!readPetRangeInputs()) syncPetRangeInputsToApplied();
+    });
+
+    petRangeMax.addEventListener("blur", () => {
+      if (!readPetRangeInputs()) syncPetRangeInputsToApplied();
+    });
+
+    petRangeReset.addEventListener("click", () => {
+      petRangeState.overrideRange = null;
+      if (applyPetRangeToActiveVolume()) refresh();
+    });
+
     function setViewUiState() {
       const isMni = currentView === VIEW.MNI;
       viewModeChip.textContent = currentView;
@@ -564,6 +756,7 @@
       if (!subjects.length) return;
       idx = Math.max(0, Math.min(newIdx, subjects.length - 1));
       const subj = subjects[idx];
+      if (petRangeState.subjectId !== subj.id) resetPetRangeState(subj.id);
       currentId = subj.id;
 
       sidEl.textContent = currentId;
@@ -582,12 +775,15 @@
           const petSpaceImg = await getPetSpace(idx);
           if (!petSpaceImg) {
             removeAllVolumesCompat();
+            petRangeState.appliedRange = null;
+            refreshPetRangeUi();
             statusEl.textContent = `PET view unavailable: missing PET-space file for subject ${subj.id}.`;
             return;
           }
 
           rebuildPetOnlyVolumes(petSpaceImg);
           await new Promise(r => requestAnimationFrame(r));
+          updatePetRangeForLoadedImage(VIEW.PET, petSpaceImg);
           applyPetOnlyDisplaySettings();
           statusEl.textContent = "Ready (PET view).";
           return;
@@ -607,6 +803,7 @@
         // Important: wait one tick so nv.volumes is populated in this Niivue build
         await new Promise(r => requestAnimationFrame(r));
 
+        updatePetRangeForLoadedImage(VIEW.MNI, petImg);
         applyMniDisplaySettings();
         applyVoiStateToViewer();
         statusEl.textContent = "Ready (MNI view).";
