@@ -7,11 +7,13 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse
 
 PORT = 8000
-SUBPETS_DIR = "subPETs"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PET_MNI_DIR = "PET_MNI"
 PET_SPACE_DIR = "PET_Space"
+EXAMPLE_DIR = "Example"
 NOTES_CSV = "notes.csv"
 
-SUBPETS_ID_RE = re.compile(r"^w(\d+)_PET_3D\.nii(?:\.gz)?$", re.IGNORECASE)
+PET_MNI_ID_RE = re.compile(r"^w(\d+)_PET_3D\.nii(?:\.gz)?$", re.IGNORECASE)
 PET_SPACE_ID_RE = re.compile(r"^(\d+)_PET_3D\.nii(?:\.gz)?$", re.IGNORECASE)
 VALID_EXT = (".nii", ".nii.gz")
 
@@ -22,6 +24,15 @@ def _is_better_file(candidate, current):
     candidate_key = (0 if candidate.lower().endswith(".nii") else 1, candidate)
     current_key = (0 if current.lower().endswith(".nii") else 1, current)
     return candidate_key < current_key
+
+
+def _resolve_data_dir(preferred_rel, fallback_rel):
+    preferred_abs = os.path.join(BASE_DIR, preferred_rel)
+    if os.path.isdir(preferred_abs):
+        return preferred_rel, preferred_abs
+
+    fallback_abs = os.path.join(BASE_DIR, fallback_rel)
+    return fallback_rel, fallback_abs
 
 
 def _index_pet_files(folder, pattern):
@@ -46,15 +57,18 @@ def _index_pet_files(folder, pattern):
 
 
 def list_subjects():
-    full_files = _index_pet_files(SUBPETS_DIR, SUBPETS_ID_RE)
-    pet_space_files = _index_pet_files(PET_SPACE_DIR, PET_SPACE_ID_RE)
+    pet_mni_rel, pet_mni_abs = _resolve_data_dir(PET_MNI_DIR, os.path.join(EXAMPLE_DIR, PET_MNI_DIR))
+    pet_space_rel, pet_space_abs = _resolve_data_dir(PET_SPACE_DIR, os.path.join(EXAMPLE_DIR, PET_SPACE_DIR))
+
+    full_files = _index_pet_files(pet_mni_abs, PET_MNI_ID_RE)
+    pet_space_files = _index_pet_files(pet_space_abs, PET_SPACE_ID_RE)
     subjects = []
     for sid, full_fn in full_files.items():
         pet_space_fn = pet_space_files.get(sid)
         subjects.append({
             "id": sid,
-            "full_path": f"{SUBPETS_DIR}/{full_fn}",
-            "pet_space_path": f"{PET_SPACE_DIR}/{pet_space_fn}" if pet_space_fn else None,
+            "full_path": f"{pet_mni_rel}/{full_fn}",
+            "pet_space_path": f"{pet_space_rel}/{pet_space_fn}" if pet_space_fn else None,
         })
 
     subjects.sort(key=lambda x: (int(x["id"]), x["id"]))
@@ -151,7 +165,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    os.chdir(BASE_DIR)
     httpd = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"Serving on http://127.0.0.1:{PORT}/viewer.html")
     httpd.serve_forever()

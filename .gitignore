@@ -1,9 +1,9 @@
-# data folders
-# subPETs/ # Has opensource data
-SPM_Outputs/
-ANTs_Outputs/
-subPETs_forIlyaReview/
-PET_Space/
+# private root data folders
+/SPM_Outputs/
+/ANTs_Outputs/
+/subPETs_forIlyaReview/
+/PET_MNI/
+/PET_Space/
 
 # OS/editor clutter
 .DS_Store

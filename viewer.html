@@ -573,15 +573,16 @@
       notesEl.value = (notesMap[currentId] ?? "");
       try {
         if (currentView === VIEW.PET) {
-          const expectedPath = `PET_Space/${subj.id}_PET_3D.nii`;
-          petPathChip.textContent = (subj.pet_space_path || expectedPath).split("/").pop();
-          topStatusEl.textContent = subj.pet_space_path || `Missing file: ${expectedPath}`;
+          petPathChip.textContent = subj.pet_space_path
+            ? subj.pet_space_path.split("/").pop()
+            : `${subj.id}_PET_3D.nii`;
+          topStatusEl.textContent = subj.pet_space_path || `Missing PET-space file for subject ${subj.id}.`;
           statusEl.textContent = "Loading PET-space volume...";
 
           const petSpaceImg = await getPetSpace(idx);
           if (!petSpaceImg) {
             removeAllVolumesCompat();
-            statusEl.textContent = `PET view missing file: ${expectedPath}`;
+            statusEl.textContent = `PET view unavailable: missing PET-space file for subject ${subj.id}.`;
             return;
           }
 
@@ -684,7 +685,7 @@
           full_path: s.full_path,
           pet_space_path: s.pet_space_path || null
         }));
-        if (!subjects.length) { statusEl.textContent = "No PETs found in subPETs/."; return; }
+        if (!subjects.length) { statusEl.textContent = "No PETs found in the configured PET_MNI folder."; return; }
         configureIdSearchUi();
         scountEl.textContent = String(subjects.length);
 
