@@ -4,8 +4,8 @@ A lightweight local NIfTI viewer for physician/neuroimaging visual reads in a we
 
 Supports two review modes:
 
--  **PET view**: PET-space subject volume only, with grayscale inversion and PET intensity min/max controls.
-- **MNI view**: MNI-normalized PET with an MNI template, Centiloid-style VOI overlays, and the same PET intensity min/max controls.
+-  **PET view**: PET-space subject volume only, with a PET-only grayscale inversion toggle.
+- **MNI view**: MNI-normalized PET with an MNI template and Centiloid-style VOI overlays.
 
 Everything runs locally. You can move through subjects, adjust PET display range and overlays, and save notes to `notes.csv`.
 
