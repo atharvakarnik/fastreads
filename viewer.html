@@ -383,8 +383,12 @@
     const toolOverlayCtx = toolOverlay.getContext("2d");
 
     let nv = null;
+    function isVectorLike(value) {
+      return Array.isArray(value) || ArrayBuffer.isView(value);
+    }
+
     function clonePanState(pan) {
-      return Array.isArray(pan) ? pan.slice(0, 4) : null;
+      return isVectorLike(pan) ? Array.from(pan).slice(0, 4) : null;
     }
 
     function defaultPanState() {
@@ -392,7 +396,7 @@
     }
 
     function normalizePanState(pan) {
-      if (!Array.isArray(pan)) return defaultPanState();
+      if (!isVectorLike(pan)) return defaultPanState();
       const out = defaultPanState();
       for (let i = 0; i < 4; i++) {
         const value = Number(pan[i]);
@@ -450,7 +454,7 @@
     }
 
     function mmToPlane(mm, orientation) {
-      if (!Array.isArray(mm) || mm.length < 3) return [NaN, NaN];
+      if (!isVectorLike(mm) || mm.length < 3) return [NaN, NaN];
       if (orientation === ORIENTATION.AXIAL) return [mm[0], mm[1]];
       if (orientation === ORIENTATION.CORONAL) return [mm[0], mm[2]];
       return [mm[1], mm[2]];
@@ -869,6 +873,7 @@
     }
 
     function eventToCanvasPoint(ev) {
+      syncToolOverlayCanvasSize();
       const rect = toolOverlay.getBoundingClientRect();
       if (!rect.width || !rect.height) return null;
       const scaleX = toolOverlay.width / rect.width;
@@ -888,7 +893,7 @@
 
     function canvasPointToMm(point, pane) {
       const mm = nv.screenXY2mm ? nv.screenXY2mm(point[0], point[1], pane.index) : [NaN, NaN, NaN];
-      return Array.isArray(mm) ? mm : [NaN, NaN, NaN];
+      return isVectorLike(mm) ? Array.from(mm) : [NaN, NaN, NaN];
     }
 
     function finishZoomDrag() {
@@ -936,25 +941,25 @@
 
       const paneCenterMm = canvasPointToMm(paneCenterPoint, drag.pane);
       const selectionCenterMm = canvasPointToMm(selectionCenterPoint, drag.pane);
-      const paneCenterPlane = mmToPlane(paneCenterMm, drag.pane.orientation);
-      const selectionCenterPlane = mmToPlane(selectionCenterMm, drag.pane.orientation);
-
-      if (!paneCenterPlane.every(Number.isFinite) || !selectionCenterPlane.every(Number.isFinite)) {
+      if (!paneCenterMm.slice(0, 3).every(Number.isFinite) || !selectionCenterMm.slice(0, 3).every(Number.isFinite)) {
         redrawToolOverlay();
         return;
       }
 
-      const currentPlanePan = panStateToPlane(currentPan, drag.pane.orientation);
-      const baseCenter = [
-        currentZoom * paneCenterPlane[0] + currentPlanePan[0],
-        currentZoom * paneCenterPlane[1] + currentPlanePan[1],
+      const centeredPan = [
+        currentPan[0] + currentZoom * (paneCenterMm[0] - selectionCenterMm[0]),
+        currentPan[1] + currentZoom * (paneCenterMm[1] - selectionCenterMm[1]),
+        currentPan[2] + currentZoom * (paneCenterMm[2] - selectionCenterMm[2]),
       ];
-      const nextPlanePan = [
-        baseCenter[0] - newZoom * selectionCenterPlane[0],
-        baseCenter[1] - newZoom * selectionCenterPlane[1],
+      const zoomDelta = currentZoom - newZoom;
+      const nextPan = [
+        centeredPan[0] + zoomDelta * selectionCenterMm[0],
+        centeredPan[1] + zoomDelta * selectionCenterMm[1],
+        centeredPan[2] + zoomDelta * selectionCenterMm[2],
+        newZoom,
       ];
 
-      setStoredSlicePan(currentView, drag.pane.orientation, planeToPanState(drag.pane.orientation, nextPlanePan, newZoom));
+      setStoredSlicePan(currentView, drag.pane.orientation, nextPan);
       redrawViewer();
     }
 
