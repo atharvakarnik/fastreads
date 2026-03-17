@@ -869,6 +869,7 @@
     }
 
     function eventToCanvasPoint(ev) {
+      syncToolOverlayCanvasSize();
       const rect = toolOverlay.getBoundingClientRect();
       if (!rect.width || !rect.height) return null;
       const scaleX = toolOverlay.width / rect.width;
@@ -936,25 +937,25 @@
 
       const paneCenterMm = canvasPointToMm(paneCenterPoint, drag.pane);
       const selectionCenterMm = canvasPointToMm(selectionCenterPoint, drag.pane);
-      const paneCenterPlane = mmToPlane(paneCenterMm, drag.pane.orientation);
-      const selectionCenterPlane = mmToPlane(selectionCenterMm, drag.pane.orientation);
-
-      if (!paneCenterPlane.every(Number.isFinite) || !selectionCenterPlane.every(Number.isFinite)) {
+      if (!paneCenterMm.slice(0, 3).every(Number.isFinite) || !selectionCenterMm.slice(0, 3).every(Number.isFinite)) {
         redrawToolOverlay();
         return;
       }
 
-      const currentPlanePan = panStateToPlane(currentPan, drag.pane.orientation);
-      const baseCenter = [
-        currentZoom * paneCenterPlane[0] + currentPlanePan[0],
-        currentZoom * paneCenterPlane[1] + currentPlanePan[1],
+      const centeredPan = [
+        currentPan[0] + currentZoom * (paneCenterMm[0] - selectionCenterMm[0]),
+        currentPan[1] + currentZoom * (paneCenterMm[1] - selectionCenterMm[1]),
+        currentPan[2] + currentZoom * (paneCenterMm[2] - selectionCenterMm[2]),
       ];
-      const nextPlanePan = [
-        baseCenter[0] - newZoom * selectionCenterPlane[0],
-        baseCenter[1] - newZoom * selectionCenterPlane[1],
+      const zoomDelta = currentZoom - newZoom;
+      const nextPan = [
+        centeredPan[0] + zoomDelta * selectionCenterMm[0],
+        centeredPan[1] + zoomDelta * selectionCenterMm[1],
+        centeredPan[2] + zoomDelta * selectionCenterMm[2],
+        newZoom,
       ];
 
-      setStoredSlicePan(currentView, drag.pane.orientation, planeToPanState(drag.pane.orientation, nextPlanePan, newZoom));
+      setStoredSlicePan(currentView, drag.pane.orientation, nextPan);
       redrawViewer();
     }
 
