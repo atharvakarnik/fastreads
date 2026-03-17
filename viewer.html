@@ -383,8 +383,12 @@
     const toolOverlayCtx = toolOverlay.getContext("2d");
 
     let nv = null;
+    function isVectorLike(value) {
+      return Array.isArray(value) || ArrayBuffer.isView(value);
+    }
+
     function clonePanState(pan) {
-      return Array.isArray(pan) ? pan.slice(0, 4) : null;
+      return isVectorLike(pan) ? Array.from(pan).slice(0, 4) : null;
     }
 
     function defaultPanState() {
@@ -392,7 +396,7 @@
     }
 
     function normalizePanState(pan) {
-      if (!Array.isArray(pan)) return defaultPanState();
+      if (!isVectorLike(pan)) return defaultPanState();
       const out = defaultPanState();
       for (let i = 0; i < 4; i++) {
         const value = Number(pan[i]);
@@ -450,7 +454,7 @@
     }
 
     function mmToPlane(mm, orientation) {
-      if (!Array.isArray(mm) || mm.length < 3) return [NaN, NaN];
+      if (!isVectorLike(mm) || mm.length < 3) return [NaN, NaN];
       if (orientation === ORIENTATION.AXIAL) return [mm[0], mm[1]];
       if (orientation === ORIENTATION.CORONAL) return [mm[0], mm[2]];
       return [mm[1], mm[2]];
@@ -889,7 +893,7 @@
 
     function canvasPointToMm(point, pane) {
       const mm = nv.screenXY2mm ? nv.screenXY2mm(point[0], point[1], pane.index) : [NaN, NaN, NaN];
-      return Array.isArray(mm) ? mm : [NaN, NaN, NaN];
+      return isVectorLike(mm) ? Array.from(mm) : [NaN, NaN, NaN];
     }
 
     function finishZoomDrag() {
