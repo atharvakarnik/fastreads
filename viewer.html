@@ -14,8 +14,10 @@
     #left { width: var(--panelW); padding:14px; box-sizing:border-box; border-right:1px solid rgba(255,255,255,0.08); background:#0f1a33; overflow:auto; }
     #viewerWrap { flex:1; display:flex; flex-direction:column; min-width: 0; }
     #topBar { padding:10px 12px; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; align-items:center; gap:10px; background:#0f1a33; }
-    #gl { flex:1; min-height: 0; }
+    #gl { flex:1; min-height: 0; position:relative; overflow:hidden; }
     canvas { width:100% !important; height:100% !important; display:block; background:#000; }
+    .viewerCanvas { position:absolute; inset:0; z-index:0; }
+    .toolOverlay { position:absolute; inset:0; z-index:1; background:transparent; pointer-events:none; touch-action:none; }
 
     .row { display:flex; gap:8px; margin:10px 0; flex-wrap:wrap; align-items:center; }
     button, input { border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#13224a; color:#e6edf7; padding:10px 12px; }
@@ -37,6 +39,10 @@
     .rangeField span { font-size:12px; opacity:0.9; }
     .rangeField input[type="number"] { width:100%; box-sizing:border-box; }
     .smallBtn { padding:10px; }
+    .toolGroup { display:flex; align-items:center; gap:6px; }
+    .toolBtn { display:inline-flex; align-items:center; gap:8px; padding:8px 10px; }
+    .toolBtn svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+    .toolBtn.isActive { background:#1d3a78; border-color:rgba(255,255,255,0.28); }
 
     details summary { cursor:pointer; user-select:none; font-weight:600; }
 
@@ -161,6 +167,37 @@
       <div class="chip">View: <span class="mono" id="viewModeChip">PET</span></div>
       <div class="chip" id="templateChip">Template: <span class="mono">Atlases/avg152T1.nii.gz</span></div>
       <div class="chip">Source: <span class="mono" id="petPathChip">-</span></div>
+      <div class="toolGroup" aria-label="Slice tools">
+        <button id="sliceToolNavigate" class="toolBtn isActive" type="button" title="Default slice navigation tool">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3v18"></path>
+            <path d="M3 12h18"></path>
+            <path d="m8 7 4-4 4 4"></path>
+            <path d="m8 17 4 4 4-4"></path>
+            <path d="m7 8-4 4 4 4"></path>
+            <path d="m17 8 4 4-4 4"></path>
+          </svg>
+          <span>Navigate</span>
+        </button>
+        <button id="sliceToolZoom" class="toolBtn" type="button" title="Drag a rectangle on one slice pane to zoom only that pane">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="6"></circle>
+            <path d="m20 20-4.2-4.2"></path>
+            <path d="M8.5 11h5"></path>
+            <path d="M11 8.5v5"></path>
+          </svg>
+          <span>Zoom</span>
+        </button>
+        <button id="sliceToolReset" class="toolBtn" type="button" title="Click a slice pane to reset only that pane's zoom">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="10" cy="10" r="5.5"></circle>
+            <path d="m19 19-3.5-3.5"></path>
+            <path d="m16.5 4.5 3 3"></path>
+            <path d="m19.5 4.5-3 3"></path>
+          </svg>
+          <span>Reset Zoom</span>
+        </button>
+      </div>
       <div style="margin-left:auto" class="status" id="topStatus"></div>
     </div>
     <div id="gl"></div>
@@ -191,6 +228,9 @@
     const DEFAULT_VOI_OPACITY = 0.30;
     const LS_KEY = "PET_VIEWER_NOTES_FULL_ONLY_V2";
     const VIEW = { PET: "PET", MNI: "MNI" };
+    const SLICE_TOOL = { NAVIGATE: "navigate", ZOOM: "zoom", RESET: "reset" };
+    const ORIENTATION = { AXIAL: 0, CORONAL: 1, SAGITTAL: 2 };
+    const ORTHOGONAL_ORIENTATIONS = [ORIENTATION.AXIAL, ORIENTATION.CORONAL, ORIENTATION.SAGITTAL];
 
     // ---------------- UI ----------------
     const sidEl = document.getElementById("sid");
@@ -201,6 +241,9 @@
     const viewModeChip = document.getElementById("viewModeChip");
     const templateChip = document.getElementById("templateChip");
     const petPathChip = document.getElementById("petPathChip");
+    const sliceToolNavigateBtn = document.getElementById("sliceToolNavigate");
+    const sliceToolZoomBtn = document.getElementById("sliceToolZoom");
+    const sliceToolResetBtn = document.getElementById("sliceToolReset");
 
     const viewPet = document.getElementById("viewPet");
     const viewMni = document.getElementById("viewMni");
@@ -257,6 +300,26 @@
       appliedRange: null,
     };
 
+    // ---------------- Slice zoom state ----------------
+    function createEmptySliceZoomByView() {
+      const perView = {};
+      for (const view of Object.values(VIEW)) {
+        perView[view] = {
+          [ORIENTATION.AXIAL]: null,
+          [ORIENTATION.CORONAL]: null,
+          [ORIENTATION.SAGITTAL]: null,
+        };
+      }
+      return perView;
+    }
+
+    let currentSliceTool = SLICE_TOOL.NAVIGATE;
+    let sliceZoomState = {
+      subjectId: null,
+      byView: createEmptySliceZoomByView(),
+    };
+    let zoomDrag = null;
+
     function cloneRange(range) {
       return range ? { min: range.min, max: range.max } : null;
     }
@@ -312,13 +375,168 @@
 
     const glDiv = document.getElementById("gl");
     const canvas = document.createElement("canvas");
+    canvas.className = "viewerCanvas";
     glDiv.appendChild(canvas);
+    const toolOverlay = document.createElement("canvas");
+    toolOverlay.className = "toolOverlay";
+    glDiv.appendChild(toolOverlay);
+    const toolOverlayCtx = toolOverlay.getContext("2d");
 
     let nv = null;
+    function clonePanState(pan) {
+      return Array.isArray(pan) ? pan.slice(0, 4) : null;
+    }
+
+    function defaultPanState() {
+      return [0, 0, 0, 1];
+    }
+
+    function normalizePanState(pan) {
+      if (!Array.isArray(pan)) return defaultPanState();
+      const out = defaultPanState();
+      for (let i = 0; i < 4; i++) {
+        const value = Number(pan[i]);
+        if (Number.isFinite(value)) out[i] = value;
+      }
+      if (!(out[3] > 0)) out[3] = 1;
+      return out;
+    }
+
+    function isDefaultPanState(pan) {
+      const normalized = normalizePanState(pan);
+      return normalized[0] === 0 && normalized[1] === 0 && normalized[2] === 0 && normalized[3] === 1;
+    }
+
+    function isOrthogonalOrientation(value) {
+      return ORTHOGONAL_ORIENTATIONS.includes(value);
+    }
+
+    function resetSliceZoomState(subjectId) {
+      sliceZoomState = {
+        subjectId,
+        byView: createEmptySliceZoomByView(),
+      };
+      zoomDrag = null;
+      redrawToolOverlay();
+    }
+
+    function getStoredSlicePan(view, orientation) {
+      return normalizePanState(sliceZoomState.byView[view]?.[orientation]);
+    }
+
+    function setStoredSlicePan(view, orientation, pan) {
+      const normalized = normalizePanState(pan);
+      sliceZoomState.byView[view][orientation] = isDefaultPanState(normalized) ? null : clonePanState(normalized);
+    }
+
+    function clearStoredSlicePan(view, orientation) {
+      if (!sliceZoomState.byView[view]) return;
+      sliceZoomState.byView[view][orientation] = null;
+    }
+
+    function panStateToPlane(pan, orientation) {
+      const [x, y, z] = normalizePanState(pan);
+      if (orientation === ORIENTATION.AXIAL) return [x, y];
+      if (orientation === ORIENTATION.CORONAL) return [x, z];
+      return [y, z];
+    }
+
+    function planeToPanState(orientation, plane, zoom) {
+      const [u, v] = plane;
+      const nextZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+      if (orientation === ORIENTATION.AXIAL) return [u, v, 0, nextZoom];
+      if (orientation === ORIENTATION.CORONAL) return [u, 0, v, nextZoom];
+      return [0, u, v, nextZoom];
+    }
+
+    function mmToPlane(mm, orientation) {
+      if (!Array.isArray(mm) || mm.length < 3) return [NaN, NaN];
+      if (orientation === ORIENTATION.AXIAL) return [mm[0], mm[1]];
+      if (orientation === ORIENTATION.CORONAL) return [mm[0], mm[2]];
+      return [mm[1], mm[2]];
+    }
+
+    function normalizePaneBounds(leftTopWidthHeight) {
+      let [x, y, w, h] = leftTopWidthHeight;
+      if (w < 0) {
+        x += w;
+        w = -w;
+      }
+      if (h < 0) {
+        y += h;
+        h = -h;
+      }
+      return { x, y, w, h };
+    }
+
+    function syncToolOverlayCanvasSize() {
+      const width = canvas.width || Math.max(1, glDiv.clientWidth);
+      const height = canvas.height || Math.max(1, glDiv.clientHeight);
+      if (toolOverlay.width !== width) toolOverlay.width = width;
+      if (toolOverlay.height !== height) toolOverlay.height = height;
+    }
+
+    function clearToolOverlay() {
+      syncToolOverlayCanvasSize();
+      toolOverlayCtx.clearRect(0, 0, toolOverlay.width, toolOverlay.height);
+    }
+
+    function redrawToolOverlay() {
+      clearToolOverlay();
+      if (currentSliceTool !== SLICE_TOOL.ZOOM || !zoomDrag) return;
+
+      const bounds = zoomDrag.pane.bounds;
+      const x0 = Math.min(zoomDrag.start[0], zoomDrag.end[0]);
+      const y0 = Math.min(zoomDrag.start[1], zoomDrag.end[1]);
+      const x1 = Math.max(zoomDrag.start[0], zoomDrag.end[0]);
+      const y1 = Math.max(zoomDrag.start[1], zoomDrag.end[1]);
+
+      toolOverlayCtx.save();
+      toolOverlayCtx.strokeStyle = "rgba(141, 197, 255, 0.95)";
+      toolOverlayCtx.fillStyle = "rgba(141, 197, 255, 0.14)";
+      toolOverlayCtx.lineWidth = Math.max(1.5, toolOverlay.width / 700);
+      toolOverlayCtx.setLineDash([10, 6]);
+      toolOverlayCtx.beginPath();
+      toolOverlayCtx.rect(bounds.x, bounds.y, bounds.w, bounds.h);
+      toolOverlayCtx.clip();
+      toolOverlayCtx.fillRect(x0, y0, x1 - x0, y1 - y0);
+      toolOverlayCtx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      toolOverlayCtx.restore();
+    }
+
+    function scheduleToolOverlayRedraw() {
+      requestAnimationFrame(() => redrawToolOverlay());
+    }
+
+    function redrawViewer() {
+      try { nv.drawScene && nv.drawScene(); }
+      catch {
+        try { nv.updateGLVolume && nv.updateGLVolume(); } catch {}
+      }
+      redrawToolOverlay();
+    }
+
+    function wrapPerPaneDraw2D(viewer) {
+      if (!viewer || viewer.__perPaneZoomWrapped) return viewer;
+      const originalDraw2D = viewer.draw2D.bind(viewer);
+      viewer.draw2D = function(bounds, sliceType, ...rest) {
+        if (!isOrthogonalOrientation(sliceType)) return originalDraw2D(bounds, sliceType, ...rest);
+        const previousPan = normalizePanState(this.scene.pan2Dxyzmm);
+        this.scene.pan2Dxyzmm = getStoredSlicePan(currentView, sliceType);
+        try {
+          return originalDraw2D(bounds, sliceType, ...rest);
+        } finally {
+          this.scene.pan2Dxyzmm = previousPan;
+        }
+      };
+      viewer.__perPaneZoomWrapped = true;
+      return viewer;
+    }
+
     function createNiivueInstance() {
       const n = new Niivue({ isColorbar:false, backColor:[0,0,0,1], show3Dcrosshair:true });
       n.attachToCanvas(canvas);
-      return n;
+      return wrapPerPaneDraw2D(n);
     }
     nv = createNiivueInstance();
 
@@ -396,6 +614,7 @@
 
     function refresh() {
       try { nv.updateGLVolume && nv.updateGLVolume(); } catch {}
+      scheduleToolOverlayRedraw();
     }
 
     function activePetVolumeIndex(view=currentView) {
@@ -483,6 +702,7 @@
         return;
       }
       nv = createNiivueInstance();
+      scheduleToolOverlayRedraw();
     }
 
     // ---------------- Data/caches ----------------
@@ -601,6 +821,141 @@
         setOpacitySafe(vi, st.visible ? st.opacity : 0.0);
       }
       refresh();
+    }
+
+    function setSliceTool(nextTool) {
+      if (!Object.values(SLICE_TOOL).includes(nextTool)) return;
+      currentSliceTool = nextTool;
+      if (zoomDrag) zoomDrag = null;
+
+      const isNavigate = nextTool === SLICE_TOOL.NAVIGATE;
+      const isZoom = nextTool === SLICE_TOOL.ZOOM;
+      const isReset = nextTool === SLICE_TOOL.RESET;
+
+      sliceToolNavigateBtn.classList.toggle("isActive", isNavigate);
+      sliceToolZoomBtn.classList.toggle("isActive", isZoom);
+      sliceToolResetBtn.classList.toggle("isActive", isReset);
+      sliceToolNavigateBtn.setAttribute("aria-pressed", String(isNavigate));
+      sliceToolZoomBtn.setAttribute("aria-pressed", String(isZoom));
+      sliceToolResetBtn.setAttribute("aria-pressed", String(isReset));
+
+      toolOverlay.style.pointerEvents = isNavigate ? "none" : "auto";
+      toolOverlay.style.cursor = isZoom ? "crosshair" : (isReset ? "cell" : "default");
+      redrawToolOverlay();
+    }
+
+    function getOrthogonalPanes() {
+      const panes = [];
+      const slices = Array.isArray(nv.screenSlices) ? nv.screenSlices : [];
+      for (let index = 0; index < slices.length; index++) {
+        const slice = slices[index];
+        if (!isOrthogonalOrientation(slice?.axCorSag)) continue;
+        panes.push({
+          index,
+          orientation: slice.axCorSag,
+          bounds: normalizePaneBounds(slice.leftTopWidthHeight || [0, 0, 0, 0]),
+        });
+      }
+      return panes;
+    }
+
+    function findPaneAtCanvasPoint(x, y) {
+      return getOrthogonalPanes().find((pane) => (
+        x >= pane.bounds.x
+        && y >= pane.bounds.y
+        && x <= pane.bounds.x + pane.bounds.w
+        && y <= pane.bounds.y + pane.bounds.h
+      )) || null;
+    }
+
+    function eventToCanvasPoint(ev) {
+      const rect = toolOverlay.getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
+      const scaleX = toolOverlay.width / rect.width;
+      const scaleY = toolOverlay.height / rect.height;
+      return [
+        (ev.clientX - rect.left) * scaleX,
+        (ev.clientY - rect.top) * scaleY,
+      ];
+    }
+
+    function clampPointToPane(point, pane) {
+      return [
+        Math.min(Math.max(point[0], pane.bounds.x), pane.bounds.x + pane.bounds.w),
+        Math.min(Math.max(point[1], pane.bounds.y), pane.bounds.y + pane.bounds.h),
+      ];
+    }
+
+    function canvasPointToMm(point, pane) {
+      const mm = nv.screenXY2mm ? nv.screenXY2mm(point[0], point[1], pane.index) : [NaN, NaN, NaN];
+      return Array.isArray(mm) ? mm : [NaN, NaN, NaN];
+    }
+
+    function finishZoomDrag() {
+      if (!zoomDrag) return;
+
+      const drag = zoomDrag;
+      zoomDrag = null;
+
+      const x0 = Math.min(drag.start[0], drag.end[0]);
+      const y0 = Math.min(drag.start[1], drag.end[1]);
+      const x1 = Math.max(drag.start[0], drag.end[0]);
+      const y1 = Math.max(drag.start[1], drag.end[1]);
+      const rectWidth = x1 - x0;
+      const rectHeight = y1 - y0;
+
+      if (rectWidth < 8 || rectHeight < 8) {
+        redrawToolOverlay();
+        return;
+      }
+
+      const paneWidth = drag.pane.bounds.w;
+      const paneHeight = drag.pane.bounds.h;
+      if (!(paneWidth > 0) || !(paneHeight > 0)) {
+        redrawToolOverlay();
+        return;
+      }
+
+      const factor = Math.min(paneWidth / rectWidth, paneHeight / rectHeight);
+      const currentPan = getStoredSlicePan(currentView, drag.pane.orientation);
+      const currentZoom = currentPan[3];
+      const newZoom = Math.min(10, Math.max(0.1, currentZoom * factor));
+      if (!(newZoom > 0)) {
+        redrawToolOverlay();
+        return;
+      }
+
+      const paneCenterPoint = [
+        drag.pane.bounds.x + drag.pane.bounds.w * 0.5,
+        drag.pane.bounds.y + drag.pane.bounds.h * 0.5,
+      ];
+      const selectionCenterPoint = [
+        x0 + rectWidth * 0.5,
+        y0 + rectHeight * 0.5,
+      ];
+
+      const paneCenterMm = canvasPointToMm(paneCenterPoint, drag.pane);
+      const selectionCenterMm = canvasPointToMm(selectionCenterPoint, drag.pane);
+      const paneCenterPlane = mmToPlane(paneCenterMm, drag.pane.orientation);
+      const selectionCenterPlane = mmToPlane(selectionCenterMm, drag.pane.orientation);
+
+      if (!paneCenterPlane.every(Number.isFinite) || !selectionCenterPlane.every(Number.isFinite)) {
+        redrawToolOverlay();
+        return;
+      }
+
+      const currentPlanePan = panStateToPlane(currentPan, drag.pane.orientation);
+      const baseCenter = [
+        currentZoom * paneCenterPlane[0] + currentPlanePan[0],
+        currentZoom * paneCenterPlane[1] + currentPlanePan[1],
+      ];
+      const nextPlanePan = [
+        baseCenter[0] - newZoom * selectionCenterPlane[0],
+        baseCenter[1] - newZoom * selectionCenterPlane[1],
+      ];
+
+      setStoredSlicePan(currentView, drag.pane.orientation, planeToPanState(drag.pane.orientation, nextPlanePan, newZoom));
+      redrawViewer();
     }
 
     // ---------------- UI build ----------------
@@ -723,6 +1078,63 @@
       if (applyPetRangeToActiveVolume()) refresh();
     });
 
+    sliceToolNavigateBtn.addEventListener("click", () => setSliceTool(SLICE_TOOL.NAVIGATE));
+    sliceToolZoomBtn.addEventListener("click", () => setSliceTool(SLICE_TOOL.ZOOM));
+    sliceToolResetBtn.addEventListener("click", () => setSliceTool(SLICE_TOOL.RESET));
+
+    toolOverlay.addEventListener("pointerdown", (ev) => {
+      if (currentSliceTool === SLICE_TOOL.NAVIGATE) return;
+      const point = eventToCanvasPoint(ev);
+      if (!point) return;
+      const pane = findPaneAtCanvasPoint(point[0], point[1]);
+      if (!pane) return;
+
+      ev.preventDefault();
+
+      if (currentSliceTool === SLICE_TOOL.RESET) {
+        clearStoredSlicePan(currentView, pane.orientation);
+        redrawViewer();
+        return;
+      }
+
+      zoomDrag = {
+        pointerId: ev.pointerId,
+        pane,
+        start: clampPointToPane(point, pane),
+        end: clampPointToPane(point, pane),
+      };
+      toolOverlay.setPointerCapture?.(ev.pointerId);
+      redrawToolOverlay();
+    });
+
+    toolOverlay.addEventListener("pointermove", (ev) => {
+      if (!zoomDrag || currentSliceTool !== SLICE_TOOL.ZOOM) return;
+      if (zoomDrag.pointerId !== ev.pointerId) return;
+      const point = eventToCanvasPoint(ev);
+      if (!point) return;
+      zoomDrag.end = clampPointToPane(point, zoomDrag.pane);
+      redrawToolOverlay();
+    });
+
+    toolOverlay.addEventListener("pointerup", (ev) => {
+      if (!zoomDrag || zoomDrag.pointerId !== ev.pointerId) return;
+      toolOverlay.releasePointerCapture?.(ev.pointerId);
+      const point = eventToCanvasPoint(ev);
+      if (point) zoomDrag.end = clampPointToPane(point, zoomDrag.pane);
+      finishZoomDrag();
+    });
+
+    toolOverlay.addEventListener("pointercancel", (ev) => {
+      if (!zoomDrag || zoomDrag.pointerId !== ev.pointerId) return;
+      toolOverlay.releasePointerCapture?.(ev.pointerId);
+      zoomDrag = null;
+      redrawToolOverlay();
+    });
+
+    window.addEventListener("resize", () => {
+      scheduleToolOverlayRedraw();
+    });
+
     function setViewUiState() {
       const isMni = currentView === VIEW.MNI;
       viewModeChip.textContent = currentView;
@@ -757,6 +1169,7 @@
       idx = Math.max(0, Math.min(newIdx, subjects.length - 1));
       const subj = subjects[idx];
       if (petRangeState.subjectId !== subj.id) resetPetRangeState(subj.id);
+      if (sliceZoomState.subjectId !== subj.id) resetSliceZoomState(subj.id);
       currentId = subj.id;
 
       sidEl.textContent = currentId;
@@ -777,6 +1190,7 @@
             removeAllVolumesCompat();
             petRangeState.appliedRange = null;
             refreshPetRangeUi();
+            redrawViewer();
             statusEl.textContent = `PET view unavailable: missing PET-space file for subject ${subj.id}.`;
             return;
           }
@@ -785,6 +1199,7 @@
           await new Promise(r => requestAnimationFrame(r));
           updatePetRangeForLoadedImage(VIEW.PET, petSpaceImg);
           applyPetOnlyDisplaySettings();
+          redrawViewer();
           statusEl.textContent = "Ready (PET view).";
           return;
         }
@@ -806,6 +1221,7 @@
         updatePetRangeForLoadedImage(VIEW.MNI, petImg);
         applyMniDisplaySettings();
         applyVoiStateToViewer();
+        redrawViewer();
         statusEl.textContent = "Ready (MNI view).";
       } catch (e) {
         console.error(e);
@@ -900,6 +1316,7 @@
         buildVoiControls();
 
         setViewUiState();
+        setSliceTool(SLICE_TOOL.NAVIGATE);
         await loadSubjectByIndex(0);
       } catch (e) {
         console.error(e);
