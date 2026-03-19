@@ -112,7 +112,7 @@ Notes:
 
 Double-click `Start_Viewer.bat`
 
-### macOS
+### macOS / Linux
 
 Run:
 
@@ -126,10 +126,14 @@ Then open:
 
 ## Notes
 
-- Python 3 required
+- Python 3.10+ required
 - no extra Python packages
 - keep the server window open while using the viewer
 - notes can be written to `notes.csv`
+- `Start_Viewer.sh` uses platform-aware browser launch logic:
+  - macOS uses `open`
+  - Linux/HPC uses Linux GUI launch tools when available
+  - if auto-open is not possible, it prints the viewer URL instead
 
  License : MIT (applies to source code in this repo. 3rd party resources retain their original license)
 
