@@ -12,6 +12,7 @@ PET_MNI_DIR = "PET_MNI"
 PET_SPACE_DIR = "PET_Space"
 EXAMPLE_DIR = "Example"
 NOTES_CSV = "notes.csv"
+CENTILOIDS_CSV = "Cohort_Centiloids.csv"
 
 PET_MNI_ID_RE = re.compile(r"^w(\d+)_PET_3D\.nii(?:\.gz)?$", re.IGNORECASE)
 PET_SPACE_ID_RE = re.compile(r"^(\d+)_PET_3D\.nii(?:\.gz)?$", re.IGNORECASE)
@@ -92,6 +93,25 @@ def read_notes_csv():
     return notes
 
 
+def read_centiloids_csv():
+    centiloids = {}
+    if not os.path.isfile(CENTILOIDS_CSV):
+        return centiloids
+    try:
+        with open(CENTILOIDS_CSV, "r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            if not reader.fieldnames or "Subject" not in reader.fieldnames or "CL" not in reader.fieldnames:
+                return {}
+            for row in reader:
+                sid = (row.get("Subject") or "").strip()
+                cl = (row.get("CL") or "").strip()
+                if sid and cl:
+                    centiloids[sid] = cl
+    except Exception:
+        return {}
+    return centiloids
+
+
 def write_notes_csv(notes_map, subject_ids=None):
     rows = []
     if subject_ids:
@@ -109,12 +129,17 @@ def write_notes_csv(notes_map, subject_ids=None):
 
 
 class Handler(SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+
     def _send_json(self, obj, status=200):
         data = json.dumps(obj).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
 
@@ -127,6 +152,10 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/notes":
             notes = read_notes_csv()
             return self._send_json({"notes": notes})
+
+        if parsed.path == "/api/centiloids":
+            centiloids = read_centiloids_csv()
+            return self._send_json({"centiloids": centiloids})
 
         return super().do_GET()
 
