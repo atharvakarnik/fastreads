@@ -41,12 +41,14 @@ if errorlevel 1 (
   exit /b 1
 )
 
+set "RUN_URL=%URL%?v=%RANDOM%%RANDOM%"
+
 echo Opening viewer...
-start "" "%URL%"
+start "" "%RUN_URL%"
 
 echo.
 echo PET Viewer started at:
-echo   %URL%
+echo   %RUN_URL%
 echo.
 echo Do not close the "PET Viewer Server" window while using the viewer.
 endlocal
