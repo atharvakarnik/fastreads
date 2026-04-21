@@ -38,7 +38,7 @@
     .rangeField { display:flex; flex-direction:column; gap:6px; min-width:0; }
     .rangeField span { font-size:12px; opacity:0.9; }
     .rangeField input[type="number"] { width:100%; box-sizing:border-box; }
-    .wlGrid { display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap:8px; margin-top:10px; }
+    .wlGrid { display:grid; grid-template-columns: minmax(0, 1fr); gap:10px; margin-top:12px; }
     .sliderField { display:flex; flex-direction:column; gap:6px; min-width:0; }
     .sliderField span { font-size:12px; opacity:0.9; }
     .sliderField .sliderRow { display:flex; align-items:center; gap:8px; }
@@ -263,6 +263,7 @@
     ];
 
     const DEFAULT_VOI_OPACITY = 0.30;
+    const DEFAULT_VISIBLE_VOIS = new Set(["whlcbl", "ctx"]);
     const LS_KEY = "PET_VIEWER_NOTES_FULL_ONLY_V2";
     const VIEW = { PET: "PET", MNI: "MNI" };
     const SLICE_TOOL = { NAVIGATE: "navigate", ZOOM: "zoom", RESET: "reset" };
@@ -330,7 +331,9 @@
     let voiState = {};
     function initVoiState(op=DEFAULT_VOI_OPACITY) {
       voiState = {};
-      for (const v of VOIS) voiState[v.key] = { visible: true, opacity: op };
+      for (const v of VOIS) {
+        voiState[v.key] = { visible: DEFAULT_VISIBLE_VOIS.has(v.key), opacity: op };
+      }
       masterOpacity.value = String(op);
       masterOpacityLabel.textContent = op.toFixed(2);
     }
