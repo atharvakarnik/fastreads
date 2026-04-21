@@ -38,6 +38,12 @@
     .rangeField { display:flex; flex-direction:column; gap:6px; min-width:0; }
     .rangeField span { font-size:12px; opacity:0.9; }
     .rangeField input[type="number"] { width:100%; box-sizing:border-box; }
+    .wlGrid { display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap:8px; margin-top:10px; }
+    .sliderField { display:flex; flex-direction:column; gap:6px; min-width:0; }
+    .sliderField span { font-size:12px; opacity:0.9; }
+    .sliderField .sliderRow { display:flex; align-items:center; gap:8px; }
+    .sliderField .sliderRow input[type="range"] { flex:1; }
+    .sliderField .sliderRow input[type="number"] { width:110px; box-sizing:border-box; }
     .smallBtn { padding:10px; }
     .toolGroup { display:flex; align-items:center; gap:6px; }
     .toolBtn { display:inline-flex; align-items:center; gap:8px; padding:8px 10px; }
@@ -52,6 +58,11 @@
     .voiMeta { font-size:12px; opacity:0.85; }
     .voiRow { display:flex; align-items:center; gap:10px; margin-top:8px; }
     .voiRow label { font-size:12px; opacity:0.9; width:60px; }
+    .spoilerCard { width:100%; display:flex; flex-direction:column; gap:10px; padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,0.14); background:linear-gradient(180deg, rgba(19,34,74,0.95), rgba(11,20,48,0.95)); text-align:left; }
+    .spoilerCardHeader { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:12px; opacity:0.9; }
+    .spoilerCardHint { opacity:0.75; }
+    .spoilerCardValue { font-size:20px; font-weight:700; letter-spacing:0.02em; transition:color 0.15s ease, text-shadow 0.15s ease, filter 0.15s ease; }
+    .spoilerCard.isHidden .spoilerCardValue { color:transparent; text-shadow:0 0 10px rgba(230,237,247,0.9); filter:blur(6px); user-select:none; }
   </style>
 </head>
 
@@ -100,6 +111,22 @@
           <input id="petRangeMax" class="mono" type="number" step="any" inputmode="decimal" disabled>
         </label>
         <button id="petRangeReset" class="smallBtn" type="button" disabled>Auto</button>
+      </div>
+      <div class="wlGrid">
+        <label class="sliderField">
+          <span>Window</span>
+          <div class="sliderRow">
+            <input id="petWindowSlider" type="range" step="any" disabled>
+            <input id="petWindowInput" class="mono" type="number" step="any" inputmode="decimal" disabled>
+          </div>
+        </label>
+        <label class="sliderField">
+          <span>Level</span>
+          <div class="sliderRow">
+            <input id="petLevelSlider" type="range" step="any" disabled>
+            <input id="petLevelInput" class="mono" type="number" step="any" inputmode="decimal" disabled>
+          </div>
+        </label>
       </div>
       <div class="status">Adjust the displayed PET calibration range for the current subject.</div>
     </div>
@@ -158,6 +185,16 @@
       <button id="saveBtn">Save Notes → notes.csv</button>
       <button id="clearBtn" title="Clears notes for current ID only">Clear This</button>
     </div>
+
+    <div class="hr"></div>
+
+    <button id="centiloidReveal" class="spoilerCard isHidden" type="button" aria-expanded="false">
+      <div class="spoilerCardHeader">
+        <span>Centiloid</span>
+        <span id="centiloidHint" class="spoilerCardHint">Click to reveal</span>
+      </div>
+      <div id="centiloidValue" class="spoilerCardValue mono">NotFound</div>
+    </button>
 
     <div class="status" id="status"></div>
   </div>
@@ -253,10 +290,17 @@
     const petRangeMin = document.getElementById("petRangeMin");
     const petRangeMax = document.getElementById("petRangeMax");
     const petRangeReset = document.getElementById("petRangeReset");
+    const petWindowSlider = document.getElementById("petWindowSlider");
+    const petWindowInput = document.getElementById("petWindowInput");
+    const petLevelSlider = document.getElementById("petLevelSlider");
+    const petLevelInput = document.getElementById("petLevelInput");
 
     const notesEl = document.getElementById("notes");
     const gotoInput = document.getElementById("gotoInput");
     const gotoDigits = document.getElementById("gotoDigits");
+    const centiloidReveal = document.getElementById("centiloidReveal");
+    const centiloidHint = document.getElementById("centiloidHint");
+    const centiloidValue = document.getElementById("centiloidValue");
 
     const prevBtn = document.getElementById("prevBtn");
     const nextBtn = document.getElementById("nextBtn");
@@ -297,7 +341,14 @@
       subjectId: null,
       overrideRange: null,
       defaultRangeByView: { [VIEW.PET]: null, [VIEW.MNI]: null },
+      sliderBoundsByView: { [VIEW.PET]: null, [VIEW.MNI]: null },
       appliedRange: null,
+    };
+
+    let centiloidsMap = {};
+    let centiloidState = {
+      subjectId: null,
+      revealed: false,
     };
 
     // ---------------- Slice zoom state ----------------
@@ -337,6 +388,31 @@
         : null;
     }
 
+    function rangeToWindowLevel(range) {
+      return range
+        ? {
+            window: range.max - range.min,
+            level: (range.min + range.max) / 2,
+          }
+        : null;
+    }
+
+    function makeWindowLevel(windowValue, levelValue) {
+      return Number.isFinite(windowValue) && windowValue > 0 && Number.isFinite(levelValue)
+        ? { window: windowValue, level: levelValue }
+        : null;
+    }
+
+    function windowLevelToRange(windowValue, levelValue) {
+      const windowLevel = makeWindowLevel(windowValue, levelValue);
+      return windowLevel
+        ? makeRange(
+            windowLevel.level - windowLevel.window / 2,
+            windowLevel.level + windowLevel.window / 2
+          )
+        : null;
+    }
+
     function formatRangeNumber(value) {
       if (!Number.isFinite(value)) return "";
       const abs = Math.abs(value);
@@ -344,15 +420,74 @@
       return String(Number(value.toFixed(4)));
     }
 
-    function syncPetRangeInputs(range) {
+    function createWindowLevelSliderBounds(range) {
+      const windowLevel = rangeToWindowLevel(range);
+      if (!windowLevel) return null;
+
+      const baseWindow = windowLevel.window;
+      const minWindow = Math.max(baseWindow / 20, Math.abs(baseWindow) * 0.001, 1e-6);
+      return {
+        windowMin: minWindow,
+        windowMax: Math.max(baseWindow * 2, minWindow * 2),
+        levelMin: windowLevel.level - baseWindow,
+        levelMax: windowLevel.level + baseWindow,
+      };
+    }
+
+    function ensureWindowLevelSliderBounds(view, range=null) {
+      let bounds = petRangeState.sliderBoundsByView[view];
+      if (!bounds) {
+        const seedRange = range || petRangeState.defaultRangeByView[view] || displayedPetRangeForView(view);
+        bounds = seedRange ? createWindowLevelSliderBounds(seedRange) : null;
+        petRangeState.sliderBoundsByView[view] = bounds;
+      }
+
+      if (!bounds || !range) return bounds;
+
+      const windowLevel = rangeToWindowLevel(range);
+      if (!windowLevel) return bounds;
+
+      bounds.windowMin = Math.max(1e-6, Math.min(bounds.windowMin, windowLevel.window * 0.5));
+      bounds.windowMax = Math.max(bounds.windowMax, windowLevel.window * 1.5);
+      bounds.levelMin = Math.min(bounds.levelMin, windowLevel.level - windowLevel.window / 2);
+      bounds.levelMax = Math.max(bounds.levelMax, windowLevel.level + windowLevel.window / 2);
+      return bounds;
+    }
+
+    function syncPetRangeControls(range) {
       petRangeMin.value = range ? formatRangeNumber(range.min) : "";
       petRangeMax.value = range ? formatRangeNumber(range.max) : "";
+
+      const windowLevel = rangeToWindowLevel(range);
+      petWindowInput.value = windowLevel ? formatRangeNumber(windowLevel.window) : "";
+      petLevelInput.value = windowLevel ? formatRangeNumber(windowLevel.level) : "";
+
+      const bounds = ensureWindowLevelSliderBounds(currentView, range);
+      if (bounds) {
+        petWindowSlider.min = formatRangeNumber(bounds.windowMin);
+        petWindowSlider.max = formatRangeNumber(bounds.windowMax);
+        petLevelSlider.min = formatRangeNumber(bounds.levelMin);
+        petLevelSlider.max = formatRangeNumber(bounds.levelMax);
+        petWindowSlider.value = windowLevel ? String(windowLevel.window) : petWindowSlider.min;
+        petLevelSlider.value = windowLevel ? String(windowLevel.level) : petLevelSlider.min;
+      } else {
+        petWindowSlider.min = "0";
+        petWindowSlider.max = "1";
+        petWindowSlider.value = "0";
+        petLevelSlider.min = "0";
+        petLevelSlider.max = "1";
+        petLevelSlider.value = "0";
+      }
     }
 
     function setPetRangeControlsEnabled(enabled) {
       petRangeMin.disabled = !enabled;
       petRangeMax.disabled = !enabled;
       petRangeReset.disabled = !enabled;
+      petWindowSlider.disabled = !enabled;
+      petWindowInput.disabled = !enabled;
+      petLevelSlider.disabled = !enabled;
+      petLevelInput.disabled = !enabled;
     }
 
     function resetPetRangeState(subjectId) {
@@ -360,10 +495,32 @@
         subjectId,
         overrideRange: null,
         defaultRangeByView: { [VIEW.PET]: null, [VIEW.MNI]: null },
+        sliderBoundsByView: { [VIEW.PET]: null, [VIEW.MNI]: null },
         appliedRange: null,
       };
-      syncPetRangeInputs(null);
+      syncPetRangeControls(null);
       setPetRangeControlsEnabled(false);
+    }
+
+    function centiloidValueForSubject(subjectId) {
+      const raw = subjectId ? centiloidsMap[subjectId] : null;
+      const text = `${raw ?? ""}`.trim();
+      return text || "NotFound";
+    }
+
+    function renderCentiloidState() {
+      centiloidValue.textContent = centiloidValueForSubject(centiloidState.subjectId);
+      centiloidReveal.classList.toggle("isHidden", !centiloidState.revealed);
+      centiloidReveal.setAttribute("aria-expanded", String(centiloidState.revealed));
+      centiloidHint.textContent = centiloidState.revealed ? "Click to hide" : "Click to reveal";
+    }
+
+    function setCentiloidSubject(subjectId, resetReveal=false) {
+      if (resetReveal || centiloidState.subjectId !== subjectId) {
+        centiloidState.revealed = false;
+      }
+      centiloidState.subjectId = subjectId;
+      renderCentiloidState();
     }
 
     // ---------------- Niivue ----------------
@@ -655,7 +812,7 @@
     }
 
     function refreshPetRangeUi() {
-      syncPetRangeInputs(displayedPetRangeForView(currentView));
+      syncPetRangeControls(displayedPetRangeForView(currentView));
       setPetRangeControlsEnabled(activePetVolumeIndex() >= 0 && !!displayedPetRangeForView(currentView));
     }
 
@@ -675,7 +832,9 @@
     }
 
     function updatePetRangeForLoadedImage(view, img) {
-      petRangeState.defaultRangeByView[view] = rememberPetImageDefaultRange(img);
+      const defaultRange = rememberPetImageDefaultRange(img);
+      petRangeState.defaultRangeByView[view] = defaultRange;
+      petRangeState.sliderBoundsByView[view] = defaultRange ? createWindowLevelSliderBounds(defaultRange) : null;
       applyPetRangeToActiveVolume();
     }
 
@@ -695,8 +854,30 @@
       return applied;
     }
 
-    function syncPetRangeInputsToApplied() {
-      syncPetRangeInputs(displayedPetRangeForView(currentView));
+    function readPetWindowLevelInputs() {
+      return makeWindowLevel(
+        parseFiniteNumber(petWindowInput.value),
+        parseFiniteNumber(petLevelInput.value)
+      );
+    }
+
+    function applyManualPetWindowLevel(windowValue, levelValue) {
+      const range = windowLevelToRange(windowValue, levelValue);
+      if (!range) return false;
+      petRangeState.overrideRange = cloneRange(range);
+      const applied = applyPetRangeToActiveVolume();
+      if (applied) refresh();
+      return applied;
+    }
+
+    function applyManualPetWindowLevelFromInputs() {
+      const windowLevel = readPetWindowLevelInputs();
+      if (!windowLevel) return false;
+      return applyManualPetWindowLevel(windowLevel.window, windowLevel.level);
+    }
+
+    function syncPetRangeControlsToApplied() {
+      syncPetRangeControls(displayedPetRangeForView(currentView));
     }
 
     function removeAllVolumesCompat() {
@@ -1071,16 +1252,51 @@
     });
 
     petRangeMin.addEventListener("blur", () => {
-      if (!readPetRangeInputs()) syncPetRangeInputsToApplied();
+      if (!readPetRangeInputs()) syncPetRangeControlsToApplied();
     });
 
     petRangeMax.addEventListener("blur", () => {
-      if (!readPetRangeInputs()) syncPetRangeInputsToApplied();
+      if (!readPetRangeInputs()) syncPetRangeControlsToApplied();
+    });
+
+    petWindowInput.addEventListener("input", () => {
+      applyManualPetWindowLevelFromInputs();
+    });
+
+    petLevelInput.addEventListener("input", () => {
+      applyManualPetWindowLevelFromInputs();
+    });
+
+    petWindowInput.addEventListener("blur", () => {
+      if (!readPetWindowLevelInputs()) syncPetRangeControlsToApplied();
+    });
+
+    petLevelInput.addEventListener("blur", () => {
+      if (!readPetWindowLevelInputs()) syncPetRangeControlsToApplied();
+    });
+
+    petWindowSlider.addEventListener("input", () => {
+      applyManualPetWindowLevel(
+        parseFiniteNumber(petWindowSlider.value),
+        parseFiniteNumber(petLevelSlider.value)
+      );
+    });
+
+    petLevelSlider.addEventListener("input", () => {
+      applyManualPetWindowLevel(
+        parseFiniteNumber(petWindowSlider.value),
+        parseFiniteNumber(petLevelSlider.value)
+      );
     });
 
     petRangeReset.addEventListener("click", () => {
       petRangeState.overrideRange = null;
       if (applyPetRangeToActiveVolume()) refresh();
+    });
+
+    centiloidReveal.addEventListener("click", () => {
+      centiloidState.revealed = !centiloidState.revealed;
+      renderCentiloidState();
     });
 
     sliceToolNavigateBtn.addEventListener("click", () => setSliceTool(SLICE_TOOL.NAVIGATE));
@@ -1173,6 +1389,7 @@
       if (!subjects.length) return;
       idx = Math.max(0, Math.min(newIdx, subjects.length - 1));
       const subj = subjects[idx];
+      const subjectChanged = currentId !== subj.id;
       if (petRangeState.subjectId !== subj.id) resetPetRangeState(subj.id);
       if (sliceZoomState.subjectId !== subj.id) resetSliceZoomState(subj.id);
       currentId = subj.id;
@@ -1182,6 +1399,7 @@
       scountEl.textContent = String(subjects.length);
 
       notesEl.value = (notesMap[currentId] ?? "");
+      setCentiloidSubject(currentId, subjectChanged);
       try {
         if (currentView === VIEW.PET) {
           petPathChip.textContent = subj.pet_space_path
@@ -1317,8 +1535,17 @@
           }
         } catch {}
 
+        try {
+          const rc = await fetch("/api/centiloids");
+          const jc = await rc.json();
+          if (jc && jc.centiloids && typeof jc.centiloids === "object") {
+            centiloidsMap = jc.centiloids;
+          }
+        } catch {}
+
         initVoiState(DEFAULT_VOI_OPACITY);
         buildVoiControls();
+        renderCentiloidState();
 
         setViewUiState();
         setSliceTool(SLICE_TOOL.NAVIGATE);
