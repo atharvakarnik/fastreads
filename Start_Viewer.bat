@@ -32,9 +32,11 @@ echo Starting PET Viewer server...
 start "PET Viewer Server" cmd /k %PY% server.py
 
 echo Waiting for server...
-powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(15); while((Get-Date) -lt $deadline){ try { $r=Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8000/viewer.html'; if($r.StatusCode -eq 200){ exit 0 } } catch {}; Start-Sleep -Milliseconds 250 }; exit 1"
+powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(15); while((Get-Date) -lt $deadline){ try { $r=Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8000/viewer.html'; if($r.StatusCode -eq 200 -and $r.Content -match 'petWindowSlider' -and $r.Content -match 'centiloidReveal'){ exit 0 } } catch {}; Start-Sleep -Milliseconds 250 }; exit 1"
 if errorlevel 1 (
-  echo Server did not become ready at %URL%
+  echo The server at %URL% did not respond with the current viewer UI.
+  echo This usually means another older PET Viewer server is already running on port 8000.
+  echo Close any old "PET Viewer Server" windows and try again.
   pause
   exit /b 1
 )
