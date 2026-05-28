@@ -302,7 +302,6 @@
     const DEFAULT_VISIBLE_VOIS = new Set(["whlcbl", "ctx"]);
     const LS_KEY = "PET_VIEWER_NOTES_FULL_ONLY_V2";
     const REVIEW_LS_KEY = "PET_VIEWER_REVIEW_FIELDS_V1";
-    const CROSSHAIR_LS_KEY = "PET_VIEWER_CROSSHAIR_VISIBLE_V1";
     const CASE_STATUS_VALUES = new Set(["", "Positive", "Negative", "Borderline"]);
     const VIEW = { PET: "PET", MNI: "MNI" };
     const SLICE_TOOL = { NAVIGATE: "navigate", ZOOM: "zoom", RESET: "reset" };
@@ -405,11 +404,7 @@
 
     function saveLocalReview(obj) { localStorage.setItem(REVIEW_LS_KEY, JSON.stringify(obj)); }
     let reviewMap = loadLocalReview();
-
-    function readCrosshairVisible() {
-      try { return localStorage.getItem(CROSSHAIR_LS_KEY) !== "false"; } catch { return true; }
-    }
-    let crosshairVisible = readCrosshairVisible();
+    let crosshairVisible = true;
 
     // ---------------- VOI state ----------------
     let voiState = {};
@@ -769,6 +764,7 @@
       const originalDraw2D = viewer.draw2D.bind(viewer);
       const originalDrawCrossLines = viewer.drawCrossLines?.bind(viewer);
       const originalDrawCrossLinesMM = viewer.drawCrossLinesMM?.bind(viewer);
+      const originalDrawCrosshairs3D = viewer.drawCrosshairs3D?.bind(viewer);
       viewer.draw2D = function(bounds, sliceType, ...rest) {
         if (!isOrthogonalOrientation(sliceType)) return originalDraw2D(bounds, sliceType, ...rest);
         const previousPan = normalizePanState(this.scene.pan2Dxyzmm);
@@ -791,6 +787,12 @@
           return originalDrawCrossLinesMM(...args);
         };
       }
+      if (originalDrawCrosshairs3D) {
+        viewer.drawCrosshairs3D = function(...args) {
+          if (!crosshairVisible) return;
+          return originalDrawCrosshairs3D(...args);
+        };
+      }
       viewer.__perPaneZoomWrapped = true;
       return viewer;
     }
@@ -804,7 +806,6 @@
 
     function setCrosshairVisible(nextVisible) {
       crosshairVisible = Boolean(nextVisible);
-      try { localStorage.setItem(CROSSHAIR_LS_KEY, String(crosshairVisible)); } catch {}
       if (nv?.opts) nv.opts.show3Dcrosshair = crosshairVisible;
       crosshairToggleBtn.classList.toggle("isActive", crosshairVisible);
       crosshairToggleBtn.setAttribute("aria-pressed", String(crosshairVisible));
@@ -1522,6 +1523,7 @@
       if (petRangeState.subjectId !== subj.id) resetPetRangeState(subj.id);
       if (sliceZoomState.subjectId !== subj.id) resetSliceZoomState(subj.id);
       currentId = subj.id;
+      if (subjectChanged) setCrosshairVisible(true);
 
       sidEl.textContent = currentId;
       sidxEl.textContent = String(idx + 1);
