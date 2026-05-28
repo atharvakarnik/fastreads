@@ -13,6 +13,14 @@ PET_SPACE_DIR = "PET_Space"
 EXAMPLE_DIR = "Example"
 NOTES_CSV = "notes.csv"
 CENTILOIDS_CSV = "Cohort_Centiloids.csv"
+NOTES_FIELDS = [
+    "ID",
+    "IN_Notes",
+    "IN_Case_Status",
+    "IN_Flag_For_Review",
+    "IN_Needs_Processing_QC",
+]
+VALID_CASE_STATUSES = {"", "Positive", "Negative", "Borderline"}
 
 PET_MNI_ID_RE = re.compile(r"^w(\d+)_PET_3D\.nii(?:\.gz)?$", re.IGNORECASE)
 PET_SPACE_ID_RE = re.compile(r"^(\d+)_PET_3D\.nii(?:\.gz)?$", re.IGNORECASE)
@@ -76,10 +84,43 @@ def list_subjects():
     return subjects
 
 
+def _subject_sort_key(sid):
+    try:
+        return (0, int(sid), sid)
+    except ValueError:
+        return (1, sid)
+
+
+def _parse_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in {"true", "1", "yes", "y"}
+
+
+def _csv_bool(value):
+    return "TRUE" if _parse_bool(value) else "FALSE"
+
+
+def _normalize_review(value):
+    if not isinstance(value, dict):
+        value = {}
+    case_status = str(value.get("case_status") or value.get("IN_Case_Status") or "").strip()
+    if case_status not in VALID_CASE_STATUSES:
+        case_status = ""
+    return {
+        "case_status": case_status,
+        "flag_for_review": _parse_bool(value.get("flag_for_review", value.get("IN_Flag_For_Review"))),
+        "needs_processing_qc": _parse_bool(value.get("needs_processing_qc", value.get("IN_Needs_Processing_QC"))),
+    }
+
+
 def read_notes_csv():
     notes = {}
+    review = {}
     if not os.path.isfile(NOTES_CSV):
-        return notes
+        return notes, review
     try:
         with open(NOTES_CSV, "r", encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f)
@@ -88,9 +129,10 @@ def read_notes_csv():
                 txt = row.get("IN_Notes") or ""
                 if sid:
                     notes[sid] = txt
+                    review[sid] = _normalize_review(row)
     except Exception:
-        return {}
-    return notes
+        return {}, {}
+    return notes, review
 
 
 def read_centiloids_csv():
@@ -112,20 +154,31 @@ def read_centiloids_csv():
     return centiloids
 
 
-def write_notes_csv(notes_map, subject_ids=None):
+def write_notes_csv(notes_map, review_map=None, subject_ids=None):
+    review_map = review_map or {}
     rows = []
     if subject_ids:
-        for sid in subject_ids:
-            rows.append({"ID": sid, "IN_Notes": notes_map.get(sid, "")})
+        row_ids = subject_ids
     else:
-        for sid in sorted(notes_map.keys(), key=lambda x: (int(x), x)):
-            rows.append({"ID": sid, "IN_Notes": notes_map.get(sid, "")})
+        row_ids = sorted(set(notes_map.keys()) | set(review_map.keys()), key=_subject_sort_key)
+
+    for sid in row_ids:
+        review = _normalize_review(review_map.get(sid))
+        rows.append({
+            "ID": sid,
+            "IN_Notes": notes_map.get(sid, ""),
+            "IN_Case_Status": review["case_status"],
+            "IN_Flag_For_Review": _csv_bool(review["flag_for_review"]),
+            "IN_Needs_Processing_QC": _csv_bool(review["needs_processing_qc"]),
+        })
 
     with open(NOTES_CSV, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["ID", "IN_Notes"])
+        writer = csv.DictWriter(f, fieldnames=NOTES_FIELDS)
         writer.writeheader()
         for r in rows:
             writer.writerow(r)
+
+    return sum(1 for r in rows if r["IN_Notes"] or r["IN_Case_Status"] or r["IN_Flag_For_Review"] == "TRUE" or r["IN_Needs_Processing_QC"] == "TRUE")
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -150,8 +203,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._send_json({"subjects": subs})
 
         if parsed.path == "/api/notes":
-            notes = read_notes_csv()
-            return self._send_json({"notes": notes})
+            notes, review = read_notes_csv()
+            return self._send_json({"notes": notes, "review": review})
 
         if parsed.path == "/api/centiloids":
             centiloids = read_centiloids_csv()
@@ -174,6 +227,10 @@ class Handler(SimpleHTTPRequestHandler):
             if not isinstance(notes_map, dict):
                 return self._send_json({"ok": False, "error": "notes must be an object/dict"}, status=400)
 
+            review_map = payload.get("review", {})
+            if not isinstance(review_map, dict):
+                return self._send_json({"ok": False, "error": "review must be an object/dict"}, status=400)
+
             subjects = list_subjects()
             subject_ids = [s["id"] for s in subjects]
             subject_id_set = set(subject_ids)
@@ -185,9 +242,16 @@ class Handler(SimpleHTTPRequestHandler):
                     continue
                 cleaned[sid] = "" if v is None else str(v)
 
-            write_notes_csv(cleaned, subject_ids=subject_ids)
+            cleaned_review = {}
+            for k, v in review_map.items():
+                sid = str(k).strip()
+                if sid not in subject_id_set:
+                    continue
+                cleaned_review[sid] = _normalize_review(v)
 
-            return self._send_json({"ok": True, "written": NOTES_CSV, "count": len(cleaned)})
+            count = write_notes_csv(cleaned, cleaned_review, subject_ids=subject_ids)
+
+            return self._send_json({"ok": True, "written": NOTES_CSV, "count": count})
 
         except Exception as e:
             return self._send_json({"ok": False, "error": str(e)}, status=500)

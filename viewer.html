@@ -20,7 +20,7 @@
     .toolOverlay { position:absolute; inset:0; z-index:1; background:transparent; pointer-events:none; touch-action:none; }
 
     .row { display:flex; gap:8px; margin:10px 0; flex-wrap:wrap; align-items:center; }
-    button, input { border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#13224a; color:#e6edf7; padding:10px 12px; }
+    button, input, select { border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#13224a; color:#e6edf7; padding:10px 12px; }
     button { cursor:pointer; }
     button:hover { filter:brightness(1.08); }
     button:disabled { opacity:0.5; cursor:not-allowed; }
@@ -49,6 +49,11 @@
     .toolBtn { display:inline-flex; align-items:center; gap:8px; padding:8px 10px; }
     .toolBtn svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
     .toolBtn.isActive { background:#1d3a78; border-color:rgba(255,255,255,0.28); }
+    .reviewGrid { display:grid; grid-template-columns: minmax(0, 1fr); gap:10px; margin-top:8px; }
+    .reviewField { display:flex; flex-direction:column; gap:6px; min-width:0; }
+    .reviewField span, .checkRow { font-size:12px; opacity:0.9; }
+    .reviewField select { width:100%; box-sizing:border-box; }
+    .checkRow { display:flex; align-items:center; gap:8px; }
 
     details summary { cursor:pointer; user-select:none; font-weight:600; }
 
@@ -178,6 +183,29 @@
 
     <div class="hr"></div>
 
+    <div class="label">Review</div>
+    <div class="reviewGrid">
+      <label class="reviewField">
+        <span>Case</span>
+        <select id="caseStatus">
+          <option value="">Unset</option>
+          <option value="Positive">Positive</option>
+          <option value="Negative">Negative</option>
+          <option value="Borderline">Borderline</option>
+        </select>
+      </label>
+      <label class="checkRow">
+        <input id="flagForReview" type="checkbox">
+        Flag for review
+      </label>
+      <label class="checkRow">
+        <input id="needsProcessingQc" type="checkbox">
+        Needs processing QC
+      </label>
+    </div>
+
+    <div class="hr"></div>
+
     <div class="label">Notes (autosaved locally; click “Save Notes” to write notes.csv)</div>
     <textarea id="notes" placeholder="Type notes here..."></textarea>
 
@@ -234,6 +262,14 @@
           </svg>
           <span>Reset Zoom</span>
         </button>
+        <button id="crosshairToggle" class="toolBtn isActive" type="button" title="Show or hide orthogonal slice crosshairs" aria-pressed="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 4v16"></path>
+            <path d="M4 12h16"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+          <span>Crosshair</span>
+        </button>
       </div>
       <div style="margin-left:auto" class="status" id="topStatus"></div>
     </div>
@@ -265,6 +301,8 @@
     const DEFAULT_VOI_OPACITY = 0.30;
     const DEFAULT_VISIBLE_VOIS = new Set(["whlcbl", "ctx"]);
     const LS_KEY = "PET_VIEWER_NOTES_FULL_ONLY_V2";
+    const REVIEW_LS_KEY = "PET_VIEWER_REVIEW_FIELDS_V1";
+    const CASE_STATUS_VALUES = new Set(["", "Positive", "Negative", "Borderline"]);
     const VIEW = { PET: "PET", MNI: "MNI" };
     const SLICE_TOOL = { NAVIGATE: "navigate", ZOOM: "zoom", RESET: "reset" };
     const ORIENTATION = { AXIAL: 0, CORONAL: 1, SAGITTAL: 2 };
@@ -282,6 +320,7 @@
     const sliceToolNavigateBtn = document.getElementById("sliceToolNavigate");
     const sliceToolZoomBtn = document.getElementById("sliceToolZoom");
     const sliceToolResetBtn = document.getElementById("sliceToolReset");
+    const crosshairToggleBtn = document.getElementById("crosshairToggle");
 
     const viewPet = document.getElementById("viewPet");
     const viewMni = document.getElementById("viewMni");
@@ -297,6 +336,9 @@
     const petLevelInput = document.getElementById("petLevelInput");
 
     const notesEl = document.getElementById("notes");
+    const caseStatusEl = document.getElementById("caseStatus");
+    const flagForReviewEl = document.getElementById("flagForReview");
+    const needsProcessingQcEl = document.getElementById("needsProcessingQc");
     const gotoInput = document.getElementById("gotoInput");
     const gotoDigits = document.getElementById("gotoDigits");
     const centiloidReveal = document.getElementById("centiloidReveal");
@@ -326,6 +368,43 @@
     }
     function saveLocalNotes(obj) { localStorage.setItem(LS_KEY, JSON.stringify(obj)); }
     let notesMap = loadLocalNotes();
+
+    function defaultReviewState() {
+      return { case_status: "", flag_for_review: false, needs_processing_qc: false };
+    }
+
+    function normalizeReviewState(value) {
+      const review = defaultReviewState();
+      if (!value || typeof value !== "object") return review;
+      const caseStatus = String(value.case_status ?? value.IN_Case_Status ?? "").trim();
+      review.case_status = CASE_STATUS_VALUES.has(caseStatus) ? caseStatus : "";
+      review.flag_for_review = parseReviewBool(value.flag_for_review ?? value.IN_Flag_For_Review);
+      review.needs_processing_qc = parseReviewBool(value.needs_processing_qc ?? value.IN_Needs_Processing_QC);
+      return review;
+    }
+
+    function parseReviewBool(value) {
+      if (typeof value === "boolean") return value;
+      if (typeof value === "number") return value !== 0;
+      const text = String(value ?? "").trim().toLowerCase();
+      return text === "true" || text === "1" || text === "yes" || text === "y";
+    }
+
+    function loadLocalReview() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(REVIEW_LS_KEY) || "{}");
+        if (!raw || typeof raw !== "object") return {};
+        const normalized = {};
+        for (const [sid, value] of Object.entries(raw)) normalized[sid] = normalizeReviewState(value);
+        return normalized;
+      } catch {
+        return {};
+      }
+    }
+
+    function saveLocalReview(obj) { localStorage.setItem(REVIEW_LS_KEY, JSON.stringify(obj)); }
+    let reviewMap = loadLocalReview();
+    let crosshairVisible = true;
 
     // ---------------- VOI state ----------------
     let voiState = {};
@@ -683,6 +762,9 @@
     function wrapPerPaneDraw2D(viewer) {
       if (!viewer || viewer.__perPaneZoomWrapped) return viewer;
       const originalDraw2D = viewer.draw2D.bind(viewer);
+      const originalDrawCrossLines = viewer.drawCrossLines?.bind(viewer);
+      const originalDrawCrossLinesMM = viewer.drawCrossLinesMM?.bind(viewer);
+      const originalDrawCrosshairs3D = viewer.drawCrosshairs3D?.bind(viewer);
       viewer.draw2D = function(bounds, sliceType, ...rest) {
         if (!isOrthogonalOrientation(sliceType)) return originalDraw2D(bounds, sliceType, ...rest);
         const previousPan = normalizePanState(this.scene.pan2Dxyzmm);
@@ -693,16 +775,42 @@
           this.scene.pan2Dxyzmm = previousPan;
         }
       };
+      if (originalDrawCrossLines) {
+        viewer.drawCrossLines = function(...args) {
+          if (!crosshairVisible) return;
+          return originalDrawCrossLines(...args);
+        };
+      }
+      if (originalDrawCrossLinesMM) {
+        viewer.drawCrossLinesMM = function(...args) {
+          if (!crosshairVisible) return;
+          return originalDrawCrossLinesMM(...args);
+        };
+      }
+      if (originalDrawCrosshairs3D) {
+        viewer.drawCrosshairs3D = function(...args) {
+          if (!crosshairVisible) return;
+          return originalDrawCrosshairs3D(...args);
+        };
+      }
       viewer.__perPaneZoomWrapped = true;
       return viewer;
     }
 
     function createNiivueInstance() {
-      const n = new Niivue({ isColorbar:false, backColor:[0,0,0,1], show3Dcrosshair:true });
+      const n = new Niivue({ isColorbar:false, backColor:[0,0,0,1], show3Dcrosshair:crosshairVisible });
       n.attachToCanvas(canvas);
       return wrapPerPaneDraw2D(n);
     }
     nv = createNiivueInstance();
+
+    function setCrosshairVisible(nextVisible) {
+      crosshairVisible = Boolean(nextVisible);
+      if (nv?.opts) nv.opts.show3Dcrosshair = crosshairVisible;
+      crosshairToggleBtn.classList.toggle("isActive", crosshairVisible);
+      crosshairToggleBtn.setAttribute("aria-pressed", String(crosshairVisible));
+      redrawViewer();
+    }
 
     // ---------------- Safe setters (INDEX-based) ----------------
     function volCount() { return Array.isArray(nv.volumes) ? nv.volumes.length : 0; }
@@ -1305,6 +1413,7 @@
     sliceToolNavigateBtn.addEventListener("click", () => setSliceTool(SLICE_TOOL.NAVIGATE));
     sliceToolZoomBtn.addEventListener("click", () => setSliceTool(SLICE_TOOL.ZOOM));
     sliceToolResetBtn.addEventListener("click", () => setSliceTool(SLICE_TOOL.RESET));
+    crosshairToggleBtn.addEventListener("click", () => setCrosshairVisible(!crosshairVisible));
 
     toolOverlay.addEventListener("pointerdown", (ev) => {
       if (currentSliceTool === SLICE_TOOL.NAVIGATE) return;
@@ -1385,6 +1494,24 @@
       if (viewMni.checked) setViewMode(VIEW.MNI);
     });
 
+    function syncReviewControlsForCurrentSubject() {
+      const review = normalizeReviewState(reviewMap[currentId]);
+      caseStatusEl.value = review.case_status;
+      flagForReviewEl.checked = review.flag_for_review;
+      needsProcessingQcEl.checked = review.needs_processing_qc;
+    }
+
+    function saveCurrentReviewFromControls() {
+      if (!currentId) return;
+      reviewMap[currentId] = {
+        case_status: CASE_STATUS_VALUES.has(caseStatusEl.value) ? caseStatusEl.value : "",
+        flag_for_review: flagForReviewEl.checked,
+        needs_processing_qc: needsProcessingQcEl.checked,
+      };
+      saveLocalReview(reviewMap);
+      statusEl.textContent = "Review fields autosaved locally (not yet written to notes.csv).";
+    }
+
     // ---------------- Navigation ----------------
     function findIndexById(id){ return subjects.findIndex(s => s.id === id); }
 
@@ -1396,12 +1523,14 @@
       if (petRangeState.subjectId !== subj.id) resetPetRangeState(subj.id);
       if (sliceZoomState.subjectId !== subj.id) resetSliceZoomState(subj.id);
       currentId = subj.id;
+      if (subjectChanged) setCrosshairVisible(true);
 
       sidEl.textContent = currentId;
       sidxEl.textContent = String(idx + 1);
       scountEl.textContent = String(subjects.length);
 
       notesEl.value = (notesMap[currentId] ?? "");
+      syncReviewControlsForCurrentSubject();
       setCentiloidSubject(currentId, subjectChanged);
       try {
         if (currentView === VIEW.PET) {
@@ -1463,12 +1592,21 @@
       statusEl.textContent = "Notes autosaved locally (not yet written to notes.csv).";
     });
 
+    caseStatusEl.addEventListener("change", saveCurrentReviewFromControls);
+    flagForReviewEl.addEventListener("change", saveCurrentReviewFromControls);
+    needsProcessingQcEl.addEventListener("change", saveCurrentReviewFromControls);
+
     clearBtn.addEventListener("click", () => {
       if (!currentId) return;
       notesEl.value = "";
+      caseStatusEl.value = "";
+      flagForReviewEl.checked = false;
+      needsProcessingQcEl.checked = false;
       notesMap[currentId] = "";
+      reviewMap[currentId] = defaultReviewState();
       saveLocalNotes(notesMap);
-      statusEl.textContent = `Cleared notes for ${currentId}.`;
+      saveLocalReview(reviewMap);
+      statusEl.textContent = `Cleared notes and review fields for ${currentId}.`;
     });
 
     prevBtn.addEventListener("click", () => loadSubjectByIndex(idx - 1));
@@ -1500,11 +1638,11 @@
         const r = await fetch("/api/notes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ notes: notesMap })
+          body: JSON.stringify({ notes: notesMap, review: reviewMap })
         });
         const out = await r.json();
         if (!out.ok) throw new Error(out.error || "Save failed");
-        statusEl.textContent = `Saved notes.csv (rows with notes: ${out.count}).`;
+        statusEl.textContent = `Saved notes.csv (rows with saved data: ${out.count}).`;
       } catch (e) {
         console.error(e);
         statusEl.textContent = "ERROR saving notes.csv (see console).";
@@ -1536,6 +1674,14 @@
             notesMap = { ...jn.notes, ...notesMap };
             saveLocalNotes(notesMap);
           }
+          if (jn && jn.review && typeof jn.review === "object") {
+            const serverReview = {};
+            for (const [sid, value] of Object.entries(jn.review)) {
+              serverReview[sid] = normalizeReviewState(value);
+            }
+            reviewMap = { ...serverReview, ...reviewMap };
+            saveLocalReview(reviewMap);
+          }
         } catch {}
 
         try {
@@ -1551,6 +1697,7 @@
         renderCentiloidState();
 
         setViewUiState();
+        setCrosshairVisible(crosshairVisible);
         setSliceTool(SLICE_TOOL.NAVIGATE);
         await loadSubjectByIndex(0);
       } catch (e) {
