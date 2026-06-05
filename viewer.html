@@ -95,11 +95,22 @@
       <button id="prevBtn">← Prev</button>
       <button id="nextBtn">Next →</button>
     </div>
+    <label class="checkRow" title="When enabled, Prev/Next skip subjects that already have saved data in notes.csv.">
+      <input id="skipReadSubjects" type="checkbox">
+      Skip saved reads
+    </label>
+    <div class="status">Saved reads: <span id="savedReadCount" class="mono">0</span>/<span id="savedReadTotal" class="mono">-</span></div>
 
     <div class="label" style="margin-top:6px;">Go to ID (<span id="gotoDigits">?</span> digits)</div>
     <div class="row">
       <input id="gotoInput" class="mono" placeholder="Loading IDs..." type="text" />
       <button id="goBtn">Go</button>
+    </div>
+
+    <div class="label" style="margin-top:6px;">Go to index (1-<span id="gotoIndexMax">?</span>)</div>
+    <div class="row">
+      <input id="gotoIndexInput" class="mono" placeholder="Loading index..." type="text" inputmode="numeric" />
+      <button id="goIndexBtn">Go</button>
     </div>
 
     <div class="hr"></div>
@@ -341,6 +352,8 @@
     const needsProcessingQcEl = document.getElementById("needsProcessingQc");
     const gotoInput = document.getElementById("gotoInput");
     const gotoDigits = document.getElementById("gotoDigits");
+    const gotoIndexInput = document.getElementById("gotoIndexInput");
+    const gotoIndexMax = document.getElementById("gotoIndexMax");
     const centiloidReveal = document.getElementById("centiloidReveal");
     const centiloidHint = document.getElementById("centiloidHint");
     const centiloidValue = document.getElementById("centiloidValue");
@@ -348,6 +361,10 @@
     const prevBtn = document.getElementById("prevBtn");
     const nextBtn = document.getElementById("nextBtn");
     const goBtn = document.getElementById("goBtn");
+    const goIndexBtn = document.getElementById("goIndexBtn");
+    const skipReadSubjectsEl = document.getElementById("skipReadSubjects");
+    const savedReadCountEl = document.getElementById("savedReadCount");
+    const savedReadTotalEl = document.getElementById("savedReadTotal");
     const saveBtn = document.getElementById("saveBtn");
     const clearBtn = document.getElementById("clearBtn");
 
@@ -405,6 +422,34 @@
     function saveLocalReview(obj) { localStorage.setItem(REVIEW_LS_KEY, JSON.stringify(obj)); }
     let reviewMap = loadLocalReview();
     let crosshairVisible = true;
+    let savedReadIds = new Set();
+
+    function reviewHasData(value) {
+      const review = normalizeReviewState(value);
+      return Boolean(review.case_status || review.flag_for_review || review.needs_processing_qc);
+    }
+
+    function subjectHasSavedData(id, notesSource=notesMap, reviewSource=reviewMap) {
+      const note = String(notesSource[id] ?? "").trim();
+      return Boolean(note || reviewHasData(reviewSource[id]));
+    }
+
+    function rebuildSavedReadIds(notesSource, reviewSource) {
+      savedReadIds = new Set();
+      const ids = new Set([
+        ...Object.keys(notesSource || {}),
+        ...Object.keys(reviewSource || {}),
+      ]);
+      for (const id of ids) {
+        if (subjectHasSavedData(id, notesSource, reviewSource)) savedReadIds.add(id);
+      }
+      updateSavedReadSummary();
+    }
+
+    function updateSavedReadSummary() {
+      savedReadCountEl.textContent = String(savedReadIds.size);
+      savedReadTotalEl.textContent = subjects.length ? String(subjects.length) : "-";
+    }
 
     // ---------------- VOI state ----------------
     let voiState = {};
@@ -1020,6 +1065,9 @@
       gotoDigits.textContent = defaultSearchIdDigits ? String(defaultSearchIdDigits) : "?";
       gotoInput.placeholder = defaultSearchId ? `e.g., ${defaultSearchId}` : "Enter subject ID";
       gotoInput.maxLength = defaultSearchId ? defaultSearchId.length : 32;
+      gotoIndexMax.textContent = subjects.length ? String(subjects.length) : "?";
+      gotoIndexInput.placeholder = subjects.length ? `1-${subjects.length}` : "Enter index";
+      updateSavedReadSummary();
     }
 
     async function loadAtlasOnce() {
@@ -1515,6 +1563,35 @@
     // ---------------- Navigation ----------------
     function findIndexById(id){ return subjects.findIndex(s => s.id === id); }
 
+    function readIndexInputValue() {
+      const text = (gotoIndexInput.value || "").trim();
+      if (!/^\d+$/.test(text)) return null;
+      const value = Number(text);
+      return Number.isInteger(value) ? value : null;
+    }
+
+    function findNextReadableIndex(startIndex, step) {
+      if (!skipReadSubjectsEl.checked) return Math.max(0, Math.min(startIndex + step, subjects.length - 1));
+
+      for (let nextIndex = startIndex + step; nextIndex >= 0 && nextIndex < subjects.length; nextIndex += step) {
+        if (!savedReadIds.has(subjects[nextIndex].id)) return nextIndex;
+      }
+      return -1;
+    }
+
+    function goRelativeSubject(step) {
+      if (!subjects.length) return;
+      const nextIndex = findNextReadableIndex(idx, step);
+      if (nextIndex < 0 || nextIndex === idx) {
+        const direction = step > 0 ? "after" : "before";
+        statusEl.textContent = skipReadSubjectsEl.checked
+          ? `No unread subjects ${direction} index ${idx + 1}.`
+          : `Already at the ${step > 0 ? "last" : "first"} subject.`;
+        return;
+      }
+      loadSubjectByIndex(nextIndex);
+    }
+
     async function loadSubjectByIndex(newIdx){
       if (!subjects.length) return;
       idx = Math.max(0, Math.min(newIdx, subjects.length - 1));
@@ -1609,8 +1686,14 @@
       statusEl.textContent = `Cleared notes and review fields for ${currentId}.`;
     });
 
-    prevBtn.addEventListener("click", () => loadSubjectByIndex(idx - 1));
-    nextBtn.addEventListener("click", () => loadSubjectByIndex(idx + 1));
+    prevBtn.addEventListener("click", () => goRelativeSubject(-1));
+    nextBtn.addEventListener("click", () => goRelativeSubject(1));
+
+    skipReadSubjectsEl.addEventListener("change", () => {
+      statusEl.textContent = skipReadSubjectsEl.checked
+        ? `Skipping saved reads (${savedReadIds.size} saved).`
+        : "Showing all subjects in sequence.";
+    });
 
     goBtn.addEventListener("click", () => {
       const id = (gotoInput.value || "").trim();
@@ -1628,8 +1711,25 @@
       loadSubjectByIndex(j);
     });
 
+    goIndexBtn.addEventListener("click", () => {
+      const requestedIndex = readIndexInputValue();
+      if (requestedIndex === null) {
+        statusEl.textContent = `Enter an index from 1 to ${subjects.length || "?"}.`;
+        return;
+      }
+      if (requestedIndex < 1 || requestedIndex > subjects.length) {
+        statusEl.textContent = `Index ${requestedIndex} is outside 1-${subjects.length}.`;
+        return;
+      }
+      loadSubjectByIndex(requestedIndex - 1);
+    });
+
     gotoInput.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") goBtn.click();
+    });
+
+    gotoIndexInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") goIndexBtn.click();
     });
 
     saveBtn.addEventListener("click", async () => {
@@ -1642,6 +1742,7 @@
         });
         const out = await r.json();
         if (!out.ok) throw new Error(out.error || "Save failed");
+        rebuildSavedReadIds(notesMap, reviewMap);
         statusEl.textContent = `Saved notes.csv (rows with saved data: ${out.count}).`;
       } catch (e) {
         console.error(e);
@@ -1670,18 +1771,21 @@
         try {
           const rn = await fetch("/api/notes");
           const jn = await rn.json();
+          let serverNotes = {};
+          let serverReview = {};
           if (jn && jn.notes && typeof jn.notes === "object") {
-            notesMap = { ...jn.notes, ...notesMap };
+            serverNotes = jn.notes;
+            notesMap = { ...serverNotes, ...notesMap };
             saveLocalNotes(notesMap);
           }
           if (jn && jn.review && typeof jn.review === "object") {
-            const serverReview = {};
             for (const [sid, value] of Object.entries(jn.review)) {
               serverReview[sid] = normalizeReviewState(value);
             }
             reviewMap = { ...serverReview, ...reviewMap };
             saveLocalReview(reviewMap);
           }
+          rebuildSavedReadIds(serverNotes, serverReview);
         } catch {}
 
         try {
