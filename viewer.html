@@ -318,6 +318,7 @@
     const SLICE_TOOL = { NAVIGATE: "navigate", ZOOM: "zoom", RESET: "reset" };
     const ORIENTATION = { AXIAL: 0, CORONAL: 1, SAGITTAL: 2 };
     const ORTHOGONAL_ORIENTATIONS = [ORIENTATION.AXIAL, ORIENTATION.CORONAL, ORIENTATION.SAGITTAL];
+    const SMOOTH_CONTINUOUS_OVERLAY_COLORMAP_TYPE = 1;
 
     // ---------------- UI ----------------
     const sidEl = document.getElementById("sid");
@@ -911,6 +912,11 @@
       }
     }
 
+    function setColormapTypeSafe(i, type) {
+      if (i < 0 || i >= volCount()) return;
+      try { nv.volumes[i].colormapType = type; } catch {}
+    }
+
     function setColormapInvertSafe(i, invert) {
       if (i < 0 || i >= volCount()) return;
       try { nv.volumes[i].colormapInvert = !!invert; } catch {}
@@ -1141,6 +1147,7 @@
 
       // PET in grayscale
       setColormapSafe(1, "gray");
+      setColormapTypeSafe(1, SMOOTH_CONTINUOUS_OVERLAY_COLORMAP_TYPE);
       setOpacitySafe(1, parseFloat(petOpacity.value));
       applyPetRangeToActiveVolume();
       refresh();
