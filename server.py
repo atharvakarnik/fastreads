@@ -35,13 +35,20 @@ def _is_better_file(candidate, current):
     return candidate_key < current_key
 
 
-def _resolve_data_dir(preferred_rel, fallback_rel):
-    preferred_abs = os.path.join(BASE_DIR, preferred_rel)
-    if os.path.isdir(preferred_abs):
-        return preferred_rel, preferred_abs
+def _resolve_subject_data_dirs():
+    pet_mni_abs = os.path.join(BASE_DIR, PET_MNI_DIR)
+    pet_space_abs = os.path.join(BASE_DIR, PET_SPACE_DIR)
+    if os.path.isdir(pet_mni_abs) or os.path.isdir(pet_space_abs):
+        return PET_MNI_DIR, pet_mni_abs, PET_SPACE_DIR, pet_space_abs
 
-    fallback_abs = os.path.join(BASE_DIR, fallback_rel)
-    return fallback_rel, fallback_abs
+    example_pet_mni_rel = os.path.join(EXAMPLE_DIR, PET_MNI_DIR)
+    example_pet_space_rel = os.path.join(EXAMPLE_DIR, PET_SPACE_DIR)
+    return (
+        example_pet_mni_rel,
+        os.path.join(BASE_DIR, example_pet_mni_rel),
+        example_pet_space_rel,
+        os.path.join(BASE_DIR, example_pet_space_rel),
+    )
 
 
 def _index_pet_files(folder, pattern):
@@ -66,17 +73,17 @@ def _index_pet_files(folder, pattern):
 
 
 def list_subjects():
-    pet_mni_rel, pet_mni_abs = _resolve_data_dir(PET_MNI_DIR, os.path.join(EXAMPLE_DIR, PET_MNI_DIR))
-    pet_space_rel, pet_space_abs = _resolve_data_dir(PET_SPACE_DIR, os.path.join(EXAMPLE_DIR, PET_SPACE_DIR))
+    pet_mni_rel, pet_mni_abs, pet_space_rel, pet_space_abs = _resolve_subject_data_dirs()
 
     full_files = _index_pet_files(pet_mni_abs, PET_MNI_ID_RE)
     pet_space_files = _index_pet_files(pet_space_abs, PET_SPACE_ID_RE)
     subjects = []
-    for sid, full_fn in full_files.items():
+    for sid in set(full_files) | set(pet_space_files):
+        full_fn = full_files.get(sid)
         pet_space_fn = pet_space_files.get(sid)
         subjects.append({
             "id": sid,
-            "full_path": f"{pet_mni_rel}/{full_fn}",
+            "full_path": f"{pet_mni_rel}/{full_fn}" if full_fn else None,
             "pet_space_path": f"{pet_space_rel}/{pet_space_fn}" if pet_space_fn else None,
         })
 

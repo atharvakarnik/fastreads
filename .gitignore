@@ -4,6 +4,8 @@
 /subPETs_forIlyaReview/
 /PET_MNI/
 /PET_Space/
+/PS_*
+/PM_*
 
 # OS/editor clutter
 .DS_Store
