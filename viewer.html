@@ -1607,8 +1607,6 @@
       if (petRangeState.subjectId !== subj.id) resetPetRangeState(subj.id);
       if (sliceZoomState.subjectId !== subj.id) resetSliceZoomState(subj.id);
       currentId = subj.id;
-      if (subjectChanged) setCrosshairVisible(true);
-
       sidEl.textContent = currentId;
       sidxEl.textContent = String(idx + 1);
       scountEl.textContent = String(subjects.length);
