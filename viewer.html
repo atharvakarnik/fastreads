@@ -556,9 +556,11 @@
       const minWindow = Math.max(baseWindow / 20, Math.abs(baseWindow) * 0.001, 1e-6);
       return {
         windowMin: minWindow,
-        windowMax: Math.max(baseWindow * 2, minWindow * 2),
-        levelMin: windowLevel.level - baseWindow,
-        levelMax: windowLevel.level + baseWindow,
+        // These are deliberately fixed while a subject is loaded. Changing
+        // them during a drag makes the same pointer movement non-reversible.
+        windowMax: Math.max(baseWindow * 1.5, minWindow * 2),
+        levelMin: windowLevel.level - baseWindow * 0.75,
+        levelMax: windowLevel.level + baseWindow * 0.75,
       };
     }
 
@@ -570,16 +572,11 @@
         petRangeState.sliderBoundsByView[view] = bounds;
       }
 
-      if (!bounds || !range) return bounds;
-
-      const windowLevel = rangeToWindowLevel(range);
-      if (!windowLevel) return bounds;
-
-      bounds.windowMin = Math.max(1e-6, Math.min(bounds.windowMin, windowLevel.window * 0.5));
-      bounds.windowMax = Math.max(bounds.windowMax, windowLevel.window * 1.5);
-      bounds.levelMin = Math.min(bounds.levelMin, windowLevel.level - windowLevel.window / 2);
-      bounds.levelMax = Math.max(bounds.levelMax, windowLevel.level + windowLevel.window / 2);
       return bounds;
+    }
+
+    function clampToBounds(value, min, max) {
+      return Math.min(max, Math.max(min, value));
     }
 
     function syncPetRangeControls(range) {
@@ -596,8 +593,12 @@
         petWindowSlider.max = formatRangeNumber(bounds.windowMax);
         petLevelSlider.min = formatRangeNumber(bounds.levelMin);
         petLevelSlider.max = formatRangeNumber(bounds.levelMax);
-        petWindowSlider.value = windowLevel ? String(windowLevel.window) : petWindowSlider.min;
-        petLevelSlider.value = windowLevel ? String(windowLevel.level) : petLevelSlider.min;
+        petWindowSlider.value = windowLevel
+          ? formatRangeNumber(clampToBounds(windowLevel.window, bounds.windowMin, bounds.windowMax))
+          : petWindowSlider.min;
+        petLevelSlider.value = windowLevel
+          ? formatRangeNumber(clampToBounds(windowLevel.level, bounds.levelMin, bounds.levelMax))
+          : petLevelSlider.min;
       } else {
         petWindowSlider.min = "0";
         petWindowSlider.max = "1";
@@ -1442,15 +1443,17 @@
     });
 
     petWindowSlider.addEventListener("input", () => {
+      const current = rangeToWindowLevel(displayedPetRangeForView(currentView));
       applyManualPetWindowLevel(
         parseFiniteNumber(petWindowSlider.value),
-        parseFiniteNumber(petLevelSlider.value)
+        current?.level
       );
     });
 
     petLevelSlider.addEventListener("input", () => {
+      const current = rangeToWindowLevel(displayedPetRangeForView(currentView));
       applyManualPetWindowLevel(
-        parseFiniteNumber(petWindowSlider.value),
+        current?.window,
         parseFiniteNumber(petLevelSlider.value)
       );
     });
